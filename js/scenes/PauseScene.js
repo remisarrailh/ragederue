@@ -2,6 +2,9 @@ import { GAME_W, GAME_H } from '../config/constants.js';
 
 const SLIDER_W = 200;
 const SLIDER_H = 6;
+const TAB_CONTROLS = 0;
+const TAB_SOUND    = 1;
+const TAB_NAMES    = ['CONTROLS', 'SOUND'];
 
 export default class PauseScene extends Phaser.Scene {
   constructor() {
@@ -14,7 +17,7 @@ export default class PauseScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     // ── Title ─────────────────────────────────────────────────────────────
-    this.add.text(GAME_W / 2, GAME_H * 0.12, 'PAUSE', {
+    this.add.text(GAME_W / 2, GAME_H * 0.08, 'PAUSE', {
       fontFamily: 'monospace',
       fontSize: '40px',
       color: '#ff6600',
@@ -22,19 +25,71 @@ export default class PauseScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5);
 
-    // ── Controls recap ────────────────────────────────────────────────────
-    const lines = [
+    // ── Tabs ──────────────────────────────────────────────────────────────
+    this._activeTab = TAB_CONTROLS;
+    this._tabLabels = [];
+    this._tabGroups = [[], []]; // gameObjects per tab
+
+    const tabY = GAME_H * 0.17;
+    const tabSpacing = 180;
+    const tabStartX = GAME_W / 2 - tabSpacing / 2;
+
+    for (let i = 0; i < TAB_NAMES.length; i++) {
+      const tx = tabStartX + i * tabSpacing;
+      const lbl = this.add.text(tx, tabY, TAB_NAMES[i], {
+        fontFamily: 'monospace', fontSize: '16px', color: '#888888',
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      lbl.on('pointerdown', () => this._switchTab(i));
+      this._tabLabels.push(lbl);
+    }
+
+    // Tab underline indicator
+    this._tabLine = this.add.rectangle(0, tabY + 14, 100, 2, 0xff6600).setOrigin(0.5, 0);
+
+    // ── Build tab contents ────────────────────────────────────────────────
+    this._buildControlsTab();
+    this._buildSoundTab();
+    this._switchTab(TAB_CONTROLS);
+
+    // ── Resume hint ───────────────────────────────────────────────────────
+    const hint = this.add.text(GAME_W / 2, GAME_H * 0.94, 'ESC / Start: resume   Q / L1: switch tab', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#888888',
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: hint, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
+
+    // ── Input ─────────────────────────────────────────────────────────────
+    this.input.keyboard.on('keydown-ESC', () => this._resume());
+    this.input.keyboard.on('keydown-Q', () => this._nextTab());
+    this.input.gamepad.on('down', (pad, button) => {
+      if (button.index === 9) this._resume();   // Start
+      if (button.index === 4) this._nextTab();   // L1
+      if (button.index === 5) this._nextTab();   // R1
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  Tab: CONTROLS
+  // ═══════════════════════════════════════════════════════════════════════
+
+  _buildControlsTab() {
+    const grp = this._tabGroups[TAB_CONTROLS];
+    const cx = GAME_W / 2;
+    const topY = GAME_H * 0.28;
+
+    const kbLines = [
       '── KEYBOARD ──',
       '',
       'WASD / Arrows      Move',
-      'Z                  Punch',
-      'X                  Kick',
-      'C                  Jab',
+      'X                  Punch',
+      'C                  Kick',
+      'V                  Jab',
       'SPACE              Jump',
       'E                  Search',
       'TAB                Inventory',
       'ESC                Resume',
-      '',
+    ];
+
+    const gpLines = [
       '── GAMEPAD ──',
       '',
       'Left Stick / D-Pad Move',
@@ -46,143 +101,232 @@ export default class PauseScene extends Phaser.Scene {
       'Start              Resume',
     ];
 
-    this.add.text(GAME_W / 2, GAME_H * 0.44, lines.join('\n'), {
-      fontFamily: 'monospace',
-      fontSize: '13px',
-      color: '#cccccc',
-      align: 'left',
-      lineSpacing: 4,
-    }).setOrigin(0.5);
+    const kbText = this.add.text(cx, topY, kbLines.join('\n'), {
+      fontFamily: 'monospace', fontSize: '13px', color: '#cccccc',
+      align: 'left', lineSpacing: 4,
+    }).setOrigin(0.5, 0);
+    grp.push(kbText);
 
-    // ── Volume slider ─────────────────────────────────────────────────────
-    this._buildVolumeSlider();
-
-    // ── Resume hint ───────────────────────────────────────────────────────
-    const hint = this.add.text(GAME_W / 2, GAME_H * 0.93, 'Press ESC / Start to resume', {
-      fontFamily: 'monospace',
-      fontSize: '14px',
-      color: '#888888',
-    }).setOrigin(0.5);
-
-    this.tweens.add({
-      targets: hint,
-      alpha: 0.3,
-      duration: 600,
-      yoyo: true,
-      repeat: -1,
-    });
-
-    // ── Input: resume ─────────────────────────────────────────────────────
-    this.input.keyboard.on('keydown-ESC', () => this._resume());
-    this.input.gamepad.on('down', (pad, button) => {
-      // Button 9 = Start on standard gamepad mapping
-      if (button.index === 9) this._resume();
-    });
+    const gpText = this.add.text(cx, topY + kbText.height + 20, gpLines.join('\n'), {
+      fontFamily: 'monospace', fontSize: '13px', color: '#cccccc',
+      align: 'left', lineSpacing: 4,
+    }).setOrigin(0.5, 0);
+    grp.push(gpText);
   }
 
-  // ── Volume slider ────────────────────────────────────────────────────────
-  _buildVolumeSlider() {
+  // ═══════════════════════════════════════════════════════════════════════
+  //  Tab: SOUND
+  // ═══════════════════════════════════════════════════════════════════════
+
+  _buildSoundTab() {
+    this._sliders = [];
+    this._activeSlider = 0;
+
+    this._buildSlider({
+      y: GAME_H * 0.40,
+      label: 'MUSIC VOLUME',
+      lsKey: 'RAGEDERUE_music_vol',
+      color: 0xff6600,
+      tab: TAB_SOUND,
+      apply: (vol) => {
+        const gs = this.scene.get('GameScene');
+        if (gs && gs.bgMusic) gs.bgMusic.setVolume(vol);
+      },
+    });
+
+    this._buildSlider({
+      y: GAME_H * 0.56,
+      label: 'SFX VOLUME',
+      lsKey: 'RAGEDERUE_sfx_vol',
+      color: 0x00ccff,
+      tab: TAB_SOUND,
+      apply: (vol) => {
+        this.registry.set('sfxVol', vol);
+      },
+    });
+
+    this._highlightSlider();
+
+    // Hint for gamepad navigation
+    const gpHint = this.add.text(GAME_W / 2, GAME_H * 0.68, '▲▼ select slider   ◄► adjust', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#666666',
+    }).setOrigin(0.5);
+    this._tabGroups[TAB_SOUND].push(gpHint);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  Tab switching
+  // ═══════════════════════════════════════════════════════════════════════
+
+  _switchTab(idx) {
+    this._activeTab = idx;
+
+    // Update tab label styles + underline
+    this._tabLabels.forEach((lbl, i) => {
+      const active = i === idx;
+      lbl.setColor(active ? '#ff6600' : '#555555');
+      lbl.setFontSize(active ? '16px' : '14px');
+    });
+    this._tabLine.setPosition(this._tabLabels[idx].x, this._tabLine.y);
+    this._tabLine.setSize(this._tabLabels[idx].width + 16, 2);
+
+    // Show/hide tab groups
+    for (let t = 0; t < this._tabGroups.length; t++) {
+      const visible = t === idx;
+      for (const go of this._tabGroups[t]) {
+        go.setVisible(visible);
+      }
+    }
+
+    // Also show/hide slider knobs + interactive elements
+    if (this._sliders) {
+      for (const s of this._sliders) {
+        const vis = idx === TAB_SOUND;
+        s.knob.setVisible(vis);
+        s.lbl.setVisible(vis);
+        s.fill.setVisible(vis);
+        s.track.setVisible(vis);
+        s.pct.setVisible(vis);
+        s.hitZone.setVisible(vis);
+        if (vis) s.hitZone.setInteractive(); else s.hitZone.disableInteractive();
+        if (vis) s.knob.setInteractive({ draggable: true }); else s.knob.disableInteractive();
+      }
+    }
+  }
+
+  _nextTab() {
+    this._switchTab((this._activeTab + 1) % TAB_NAMES.length);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  Slider builder
+  // ═══════════════════════════════════════════════════════════════════════
+
+  _buildSlider({ y, label, lsKey, color, tab, apply }) {
     const cx = GAME_W / 2;
-    const sy = GAME_H * 0.80;
-    const savedVol = parseFloat(localStorage.getItem('RAGEDERUE_music_vol') ?? '0.5');
+    const saved = parseFloat(localStorage.getItem(lsKey) ?? '0.5');
+    const grp = this._tabGroups[tab];
 
     // Label
-    this.add.text(cx, sy - 22, 'MUSIC VOLUME', {
-      fontFamily: 'monospace', fontSize: '13px', color: '#ff8800',
+    const lbl = this.add.text(cx, y - 22, label, {
+      fontFamily: 'monospace', fontSize: '14px', color: '#ff8800',
     }).setOrigin(0.5);
+    grp.push(lbl);
 
-    // Track background
+    // Track
     const trackX = cx - SLIDER_W / 2;
-    this.add.rectangle(cx, sy, SLIDER_W, SLIDER_H, 0x333333).setOrigin(0.5);
+    const track = this.add.rectangle(cx, y, SLIDER_W, SLIDER_H, 0x333333).setOrigin(0.5);
+    grp.push(track);
 
-    // Fill bar
-    const fill = this.add.rectangle(
-      trackX, sy, SLIDER_W * savedVol, SLIDER_H, 0xff6600
-    ).setOrigin(0, 0.5);
+    // Fill
+    const fill = this.add.rectangle(trackX, y, SLIDER_W * saved, SLIDER_H, color)
+      .setOrigin(0, 0.5);
+    grp.push(fill);
 
     // Knob
-    const knob = this.add.circle(
-      trackX + SLIDER_W * savedVol, sy, 10, 0xffffff
-    ).setInteractive({ draggable: true, useHandCursor: true });
+    const knob = this.add.circle(trackX + SLIDER_W * saved, y, 10, 0xffffff)
+      .setInteractive({ draggable: true, useHandCursor: true });
 
-    // Percentage text
-    const pctText = this.add.text(cx + SLIDER_W / 2 + 28, sy, `${Math.round(savedVol * 100)}%`, {
-      fontFamily: 'monospace', fontSize: '13px', color: '#cccccc',
+    // Percentage
+    const pct = this.add.text(cx + SLIDER_W / 2 + 30, y, `${Math.round(saved * 100)}%`, {
+      fontFamily: 'monospace', fontSize: '14px', color: '#cccccc',
     }).setOrigin(0.5);
+    grp.push(pct);
 
     const applyVol = (vol) => {
       fill.width = SLIDER_W * vol;
       knob.x = trackX + SLIDER_W * vol;
-      pctText.setText(`${Math.round(vol * 100)}%`);
-      localStorage.setItem('RAGEDERUE_music_vol', vol.toFixed(2));
-      const gameScene = this.scene.get('GameScene');
-      if (gameScene && gameScene.bgMusic) {
-        gameScene.bgMusic.setVolume(vol);
-      }
+      pct.setText(`${Math.round(vol * 100)}%`);
+      localStorage.setItem(lsKey, vol.toFixed(2));
+      apply(vol);
     };
 
-    // Store for gamepad update loop
-    this._volState = { vol: savedVol, applyVol, trackX };
-
-    // Drag handler
-    this.input.on('drag', (pointer, gameObject, dragX) => {
-      if (gameObject !== knob) return;
-      const clamped = Phaser.Math.Clamp(dragX, trackX, trackX + SLIDER_W);
-      knob.x = clamped;
-      const v = (clamped - trackX) / SLIDER_W;
-      this._volState.vol = v;
-      applyVol(v);
-    });
-
-    // Click on track to jump knob
-    const hitZone = this.add.rectangle(cx, sy, SLIDER_W + 20, 30, 0x000000, 0)
+    // Hit zone for clicking on track
+    const hitZone = this.add.rectangle(cx, y, SLIDER_W + 20, 30, 0x000000, 0)
       .setOrigin(0.5).setInteractive({ useHandCursor: true });
     hitZone.on('pointerdown', (pointer) => {
       const clamped = Phaser.Math.Clamp(pointer.x, trackX, trackX + SLIDER_W);
+      const v = (clamped - trackX) / SLIDER_W;
+      state.vol = v;
+      applyVol(v);
+      this._activeSlider = this._sliders.indexOf(state);
+      this._highlightSlider();
+    });
+
+    const state = { vol: saved, applyVol, trackX, lbl, knob, fill, track, pct, hitZone };
+    this._sliders.push(state);
+
+    // Drag
+    this.input.on('drag', (pointer, go, dragX) => {
+      if (go !== knob) return;
+      const clamped = Phaser.Math.Clamp(dragX, trackX, trackX + SLIDER_W);
       knob.x = clamped;
       const v = (clamped - trackX) / SLIDER_W;
-      this._volState.vol = v;
+      state.vol = v;
       applyVol(v);
     });
 
-    // Hint for gamepad
-    this.add.text(cx, sy + 20, '◄ D-Pad / Stick ►', {
-      fontFamily: 'monospace', fontSize: '10px', color: '#666666',
-    }).setOrigin(0.5);
+    // Apply initial value so registry is set
+    apply(saved);
   }
 
-  // ── Gamepad volume control (runs every frame) ───────────────────────────
-  update() {
-    if (!this._volState) return;
+  _highlightSlider() {
+    if (!this._sliders) return;
+    this._sliders.forEach((s, i) => {
+      const active = i === this._activeSlider;
+      s.lbl.setColor(active ? '#ffcc00' : '#ff8800');
+      s.knob.setFillStyle(active ? 0xffcc00 : 0xffffff);
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  Gamepad: adjust sliders (runs every frame)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  update(time, delta) {
+    // Only process gamepad slider control on SOUND tab
+    if (this._activeTab !== TAB_SOUND) return;
+    if (!this._sliders || this._sliders.length === 0) return;
     const gp = this.input.gamepad;
     if (!gp || gp.total === 0) return;
     const pad = gp.getPad(0);
     if (!pad) return;
 
     const DEAD = 0.2;
-    const SPEED = 0.8;  // full range per second at full tilt
-    let dir = 0;
+    const SPEED = 0.8;
 
-    // D-pad
+    // ── vertical: switch slider ───────────────────────────────────────
+    this._gpVertCd = (this._gpVertCd || 0) - delta;
+    let vert = 0;
+    if (pad.up    || pad.leftStick.y < -DEAD) vert = -1;
+    if (pad.down  || pad.leftStick.y >  DEAD) vert =  1;
+    if (vert !== 0 && this._gpVertCd <= 0) {
+      this._activeSlider = Phaser.Math.Clamp(this._activeSlider + vert, 0, this._sliders.length - 1);
+      this._highlightSlider();
+      this._gpVertCd = 220;
+    }
+    if (vert === 0) this._gpVertCd = 0;
+
+    // ── horizontal: adjust value ──────────────────────────────────────
+    let dir = 0;
     if (pad.left)  dir = -1;
     if (pad.right) dir =  1;
-
-    // Left stick
-    if (Math.abs(pad.leftStick.x) > DEAD) {
-      dir = pad.leftStick.x;
-    }
+    if (Math.abs(pad.leftStick.x) > DEAD) dir = pad.leftStick.x;
 
     if (dir !== 0) {
-      const dt = this.game.loop.delta / 1000;
-      const { vol, applyVol } = this._volState;
-      const newVol = Phaser.Math.Clamp(vol + dir * SPEED * dt, 0, 1);
-      this._volState.vol = newVol;
-      applyVol(newVol);
+      const dt = delta / 1000;
+      const s = this._sliders[this._activeSlider];
+      const nv = Phaser.Math.Clamp(s.vol + dir * SPEED * dt, 0, 1);
+      s.vol = nv;
+      s.applyVol(nv);
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  //  Resume
+  // ═══════════════════════════════════════════════════════════════════════
+
   _resume() {
-    // Resume music
     const gameScene = this.scene.get('GameScene');
     if (gameScene && gameScene.bgMusic) {
       gameScene.bgMusic.resume();

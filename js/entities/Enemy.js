@@ -161,7 +161,7 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.setVelocity(dir * 50, 0);   // micro-recul
 
     // SFX
-    this.scene.sound.play('sfx_hit');
+    this.scene.sound.play('sfx_hit', { volume: this.scene.registry.get('sfxVol') ?? 0.5 });
 
     // Flash rouge pour indiquer le coup
     this.setTint(0xff4444);
@@ -188,7 +188,7 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.play('enemy_hurt', true);
 
     // SFX
-    this.scene.sound.play('sfx_hit');
+    this.scene.sound.play('sfx_hit', { volume: this.scene.registry.get('sfxVol') ?? 0.5 });
 
     // ── Projection horizontale via la physique ──────────────────────────
     this.setVelocity(dir * knockback * 2.2, 0);
@@ -280,13 +280,14 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.setVelocity(0, 0);
 
     // SFX
-    this.scene.sound.play('sfx_death_enemy');
+    this.scene.sound.play('sfx_death_enemy', { volume: this.scene.registry.get('sfxVol') ?? 0.5 });
 
     // Generate loot for this corpse
     const count = Phaser.Math.Between(CORPSE_ITEM_COUNT.min, CORPSE_ITEM_COUNT.max);
     this.lootItems = rollLoot(CORPSE_LOOT_TABLE, count); // array of type keys
     this.searched  = false;  // true once player has searched this body
     this.searchable = true;  // flag for the search system
+    this.opened     = false; // true after first search (skip opening anim on re-search)
 
     // Play hurt anim — stays on last frame (corpse on ground)
     this.play('enemy_hurt', true);

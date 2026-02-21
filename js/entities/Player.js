@@ -51,13 +51,14 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this._isAirborne  = false;    // true during jump arc
     this._groundY     = y;        // memorised Y for landing
     this.searching    = false;    // true while SearchScene is open
+    this.inInventory  = false;    // true while InventoryScene is open
 
     // ── Keyboard attack keys ───────────────────────────────────────────────
-    // Z=punch  X=kick  C=jab  SPACE=jump
+    // X=punch  C=kick  V=jab  SPACE=jump
     this.attackKeys = {
-      punch: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z),
-      kick:  scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X),
-      jab:   scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C),
+      punch: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X),
+      kick:  scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C),
+      jab:   scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.V),
       jump:  scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
     };
 
@@ -65,6 +66,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this._gpAttack = { punch: false, kick: false, jab: false, jump: false };
     scene.input.gamepad.on('down', (pad, button) => {
       if (pad.index !== 0) return;
+      if (this.searching || this.inInventory) return;  // ignore while overlay is open
       if (button.index === 2) this._gpAttack.punch = true; // Square / X
       if (button.index === 1) this._gpAttack.kick  = true; // Circle / B
       if (button.index === 3) this._gpAttack.jab   = true; // Triangle / Y
@@ -110,14 +112,21 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
   // ─────────────────────────────────────────────────────── update ──────────
   update(cursors, wasd) {
-    // Frozen while searching a container / corpse
-    if (this.searching) {
+    // Frozen while searching a container / corpse or in inventory
+    if (this.searching || this.inInventory) {
       this.setVelocity(0, 0);
       if (this.state !== 'idle' && this.state !== 'hurt') {
         this.state = 'idle';
         this.play('player_idle', true);
       }
+      this._wasFrozen = true;
       return;
+    }
+
+    // Just unfroze — flush any stale gamepad flags from overlay buttons
+    if (this._wasFrozen) {
+      this._wasFrozen = false;
+      this._gpAttack.punch = this._gpAttack.kick = this._gpAttack.jab = this._gpAttack.jump = false;
     }
 
     if (this.state === 'hurt') {
@@ -147,13 +156,22 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
     if (this.combat) this.combat.deactivateHitboxes(this);
 
+    // Death check
+    if (this.hp <= 0) {
+      this.state = 'dead';
+      this.setVelocity(0, 0);
+      this.play('player_hurt', true);
+      this.scene.sound.play('sfx_death_player', { volume: this.scene.registry.get('sfxVol') ?? 0.5 });
+      return;  // GameScene.update() will detect hp <= 0 and end the game
+    }
+
     this.state = 'hurt';
     const dir = this.x >= fromX ? 1 : -1;
     this.setVelocity(dir * knockback, 0);
     this.play('player_hurt', true);
 
     // SFX
-    this.scene.sound.play('sfx_hit');
+    this.scene.sound.play('sfx_hit', { volume: this.scene.registry.get('sfxVol') ?? 0.5 });
 
     // Clignotement style beat-em-up : flash net 0 ↔ 1
     this.setAlpha(1);

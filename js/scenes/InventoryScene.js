@@ -23,6 +23,9 @@ export default class InventoryScene extends Phaser.Scene {
   }
 
   create() {
+    // ── HP snapshot for hit detection ─────────────────────────────────────
+    this._hpSnapshot = this.player.hp;
+
     // ── Overlay ───────────────────────────────────────────────────────────
     this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.65);
 
@@ -108,7 +111,7 @@ export default class InventoryScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-RIGHT', () => { this.registry.set('inputMode', 'kb'); this._move(1, 0); });
     this.input.keyboard.on('keydown-UP',    () => { this.registry.set('inputMode', 'kb'); this._move(0, -1); });
     this.input.keyboard.on('keydown-DOWN',  () => { this.registry.set('inputMode', 'kb'); this._move(0, 1); });
-    this.input.keyboard.on('keydown-Z',     () => { this.registry.set('inputMode', 'kb'); this._useSelected(); });
+    this.input.keyboard.on('keydown-X',     () => { this.registry.set('inputMode', 'kb'); this._useSelected(); });
 
     // Gamepad
     this._gpCooldown = 0;
@@ -121,6 +124,12 @@ export default class InventoryScene extends Phaser.Scene {
   }
 
   update(time, delta) {
+    // ── Hit detection — close inventory if player takes damage ──────────
+    if (this.player.hp < this._hpSnapshot || this.player.state === 'hurt' || this.player.state === 'dead') {
+      this._forceClose();
+      return;
+    }
+
     // Adaptive hint refresh
     this._refreshHint();
 
@@ -151,7 +160,7 @@ export default class InventoryScene extends Phaser.Scene {
     const gp = this.registry.get('inputMode') === 'gp';
     this._hintText.setText(gp
       ? 'D-Pad: navigate   A: use   B: close'
-      : 'Arrows: navigate   Z: use   TAB: close');
+      : 'Arrows: navigate   X: use   TAB: close');
   }
 
   _move(dx, dy) {
@@ -285,8 +294,15 @@ export default class InventoryScene extends Phaser.Scene {
 
   _close() {
     if (this._isUsing) return;
-    this.scene.resume('GameScene');
-    this.scene.resume('HUDScene');
+    this.player.inInventory = false;
+    this.scene.stop();
+  }
+
+  _forceClose() {
+    // Cancel use-in-progress tween
+    this.tweens.killAll();
+    this._isUsing = false;
+    this.player.inInventory = false;
     this.scene.stop();
   }
 }

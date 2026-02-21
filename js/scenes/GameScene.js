@@ -17,10 +17,23 @@ const EXTRACT_W  = 120;
 
 // Enemy spawn definitions  { x, y, cfg }
 const ENEMY_SPAWNS = [
-  { x: 500,  y: 420, cfg: {} },
-  { x: 900,  y: 385, cfg: {} },
-  { x: 1350, y: 445, cfg: { hp: 80, speed: 80 } },
+  { x: 400,  y: 410, cfg: {} },
+  { x: 650,  y: 380, cfg: {} },
+  { x: 900,  y: 440, cfg: {} },
+  { x: 1100, y: 395, cfg: {} },
+  { x: 1400, y: 450, cfg: { hp: 80, speed: 80 } },
+  { x: 1700, y: 385, cfg: {} },
+  { x: 2000, y: 430, cfg: { hp: 80, speed: 80 } },
+  { x: 2400, y: 400, cfg: {} },
+  { x: 2800, y: 445, cfg: { hp: 100, speed: 70 } },
+  { x: 3200, y: 390, cfg: {} },
 ];
+
+// Wave spawner config
+const WAVE_INTERVAL  = 10_000; // ms between waves
+const WAVE_MIN       = 1;     // min enemies per wave
+const WAVE_MAX       = 3;     // max enemies per wave
+const SPAWN_MARGIN   = 300;   // px off-screen margin for spawn x
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
@@ -101,6 +114,13 @@ export default class GameScene extends Phaser.Scene {
 
     // No physical body collision — combat is handled by the hitbox system
 
+    // ── Wave spawner timer ────────────────────────────────────────────────
+    this._waveTimer = this.time.addEvent({
+      delay: WAVE_INTERVAL,
+      loop: true,
+      callback: () => this._spawnWave(),
+    });
+
     // ── Inventory ─────────────────────────────────────────────────────────
     this.inventory = new Inventory();
 
@@ -130,9 +150,19 @@ export default class GameScene extends Phaser.Scene {
     // ── Music ─────────────────────────────────────────────────────────────
     // Stop any leftover music from a previous run
     this.sound.stopByKey('music_street');
-    const savedVol = parseFloat(localStorage.getItem('sor_music_vol') ?? '0.5');
+    const savedVol = parseFloat(localStorage.getItem('RAGEDERUE_music_vol') ?? '0.5');
     this.bgMusic = this.sound.add('music_street', { loop: true, volume: savedVol });
     this.bgMusic.play();
+
+    // ── SFX volume from localStorage → registry ──────────────────────────
+    const sfxVol = parseFloat(localStorage.getItem('RAGEDERUE_sfx_vol') ?? '0.5');
+    this.registry.set('sfxVol', sfxVol);
+
+    // ── Search re-trigger cooldown ────────────────────────────────────────
+    this._searchCooldown = 0;
+    this.scene.get('SearchScene').events.on('shutdown', () => {
+      this._searchCooldown = 500; // ms before search can be re-triggered
+    });
 
     // ── Interaction / Inventory keys ──────────────────────────────────────
     this.input.keyboard.on('keydown-E',   () => { this.registry.set('inputMode', 'kb'); this._interact(); });
@@ -143,6 +173,7 @@ export default class GameScene extends Phaser.Scene {
     this.input.keyboard.on('keydown', () => { this.registry.set('inputMode', 'kb'); });
     this.input.gamepad.on('down', (pad, button) => {
       this.registry.set('inputMode', 'gp');
+      if (this.player.searching) return;  // ignore GameScene input while search overlay is open
       if (button.index === 9) this._togglePause();       // Start
       if (button.index === 3) this._interact();           // Y / Triangle
       if (button.index === 8) this._openInventory();      // Select
@@ -152,6 +183,9 @@ export default class GameScene extends Phaser.Scene {
   // ──────────────────────────────────────────────────── update ─────────────
   update(time, delta) {
     if (this._gameEnded) return;
+
+    // ── Search cooldown tick ───────────────────────────────────────────
+    if (this._searchCooldown > 0) this._searchCooldown -= delta;
 
     // ── Timer countdown ────────────────────────────────────────────────────
     this.runTimer -= delta / 1000;
@@ -165,6 +199,11 @@ export default class GameScene extends Phaser.Scene {
     this.player.update(this.cursors, this.wasd);
     this.enemies.forEach(e => e.update(this.player));
     this.combat.update([this.player, ...this.enemies]);
+
+    // ── Player death check ────────────────────────────────────────────────
+    if (this.player.hp <= 0) {
+      return this._endGame('over', 'DEAD');
+    }
 
     // ── Search proximity ───────────────────────────────────────────────────
     const searchResult = this.lootSystem.update(this.player, this.enemies);
@@ -250,6 +289,38 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
+  // ── Wave spawner ──────────────────────────────────────────────────────
+  _spawnWave() {
+    if (this._gameEnded) return;
+
+    const count = Phaser.Math.Between(WAVE_MIN, WAVE_MAX);
+    const camX  = this.cameras.main.scrollX;
+
+    for (let i = 0; i < count; i++) {
+      // Pick a random x that's off-screen (left or right of camera)
+      let sx;
+      if (Math.random() < 0.5) {
+        // Spawn to the left of the camera
+        sx = camX - SPAWN_MARGIN + Phaser.Math.Between(-80, 0);
+      } else {
+        // Spawn to the right of the camera
+        sx = camX + GAME_W + SPAWN_MARGIN + Phaser.Math.Between(0, 80);
+      }
+      // Clamp within world bounds (but away from extraction zone)
+      sx = Phaser.Math.Clamp(sx, 60, EXTRACT_X - 120);
+
+      const sy  = Phaser.Math.Between(LANE_TOP + 10, LANE_BOTTOM - 10);
+
+      // Occasionally spawn a tougher variant
+      const tough = Math.random() < 0.25;
+      const cfg   = tough ? { hp: 100, speed: 70 } : {};
+
+      const enemy = new Enemy(this, sx, sy, this.combat, cfg);
+      this.enemies.push(enemy);
+      this.enemiesGroup.add(enemy);
+    }
+  }
+
   _placeProp(key, wx, wy, scl) {
     const img = this.add.image(wx, wy, key).setOrigin(0.5, 1);
     if (scl !== undefined) img.setScale(scl);
@@ -259,7 +330,16 @@ export default class GameScene extends Phaser.Scene {
 
   _togglePause() {
     if (this._gameEnded) return;
-    this.sound.play('sfx_menu');
+    // Close any overlay before pausing
+    if (this.scene.isActive('InventoryScene')) {
+      this.player.inInventory = false;
+      this.scene.stop('InventoryScene');
+    }
+    if (this.scene.isActive('SearchScene')) {
+      this.player.searching = false;
+      this.scene.stop('SearchScene');
+    }
+    this.sound.play('sfx_menu', { volume: this.registry.get('sfxVol') ?? 0.5 });
     if (this.bgMusic) this.bgMusic.pause();
     this.scene.pause();
     this.scene.pause('HUDScene');
@@ -270,10 +350,11 @@ export default class GameScene extends Phaser.Scene {
   _interact() {
     if (this._gameEnded) return;
     if (this.player.searching) return;  // already searching
+    if (this._searchCooldown > 0) return;  // cooldown after closing search
     const target = this.lootSystem.nearestTarget;
     if (!target) return;
 
-    this.sound.play('sfx_menu');
+    this.sound.play('sfx_menu', { volume: this.registry.get('sfxVol') ?? 0.5 });
     // Game keeps running — player is frozen but enemies still move
     this.player.searching = true;
     this.player.setVelocity(0, 0);
@@ -287,10 +368,11 @@ export default class GameScene extends Phaser.Scene {
   // ── Open inventory overlay ───────────────────────────────────────────
   _openInventory() {
     if (this._gameEnded) return;
-    if (this.player.searching) return;  // can't open inventory while searching
-    this.sound.play('sfx_menu');
-    this.scene.pause();
-    this.scene.pause('HUDScene');
+    if (this.player.searching || this.player.inInventory) return;
+    this.sound.play('sfx_menu', { volume: this.registry.get('sfxVol') ?? 0.5 });
+    // Game keeps running — player is frozen but enemies still move
+    this.player.inInventory = true;
+    this.player.setVelocity(0, 0);
     this.scene.launch('InventoryScene', {
       inventory: this.inventory,
       player:    this.player,

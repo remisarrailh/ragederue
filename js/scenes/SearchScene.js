@@ -73,14 +73,21 @@ export default class SearchScene extends Phaser.Scene {
     this._cursor = null;
     this._hpSnapshot = this.player.hp;  // to detect hits
 
-    // ── Phase 1 — Opening bar ───────────────────────────────────────────
-    this.tweens.add({
-      targets: this._barFill,
-      width: BOX_W - 40,
-      duration: SEARCH_OPEN_MS,
-      ease: 'Linear',
-      onComplete: () => this._beginIdentify(),
-    });
+    // ── Phase 1 — Opening bar (skip if already opened before) ────────────
+    if (this.target.opened) {
+      // Already opened — go straight to showing identified items
+      this._barBg.setVisible(false);
+      this._barFill.setVisible(false);
+      this._skipToReady();
+    } else {
+      this.tweens.add({
+        targets: this._barFill,
+        width: BOX_W - 40,
+        duration: SEARCH_OPEN_MS,
+        ease: 'Linear',
+        onComplete: () => this._beginIdentify(),
+      });
+    }
 
     // ── Keyboard input ──────────────────────────────────────────────────
     this.input.keyboard.on('keydown-E',     () => { this.registry.set('inputMode', 'kb'); this._tryClose(); });
@@ -88,8 +95,8 @@ export default class SearchScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-ESC',   () => { this.registry.set('inputMode', 'kb'); this._tryClose(); });
     this.input.keyboard.on('keydown-UP',    () => { this.registry.set('inputMode', 'kb'); this._moveSel(-1); });
     this.input.keyboard.on('keydown-DOWN',  () => { this.registry.set('inputMode', 'kb'); this._moveSel(1); });
-    this.input.keyboard.on('keydown-Z',     () => { this.registry.set('inputMode', 'kb'); this._takeSelected(); });
-    this.input.keyboard.on('keydown-X',     () => { this.registry.set('inputMode', 'kb'); });
+    this.input.keyboard.on('keydown-X',     () => { this.registry.set('inputMode', 'kb'); this._takeSelected(); });
+    this.input.keyboard.on('keydown-C',     () => { this.registry.set('inputMode', 'kb'); });
 
     // ── Gamepad input ───────────────────────────────────────────────────
     this._gpCooldown = 0;
@@ -140,18 +147,37 @@ export default class SearchScene extends Phaser.Scene {
     const gp = this.registry.get('inputMode') === 'gp';
     this._hint.setText(gp
       ? 'A: take   B: close'
-      : 'Z: take   E / TAB: close');
+      : 'X: take   E / TAB: close');
   }
 
   // ═══════════════════════════════════════════════════════════════════════
   //  Phase 2 — Identify items one by one
   // ═══════════════════════════════════════════════════════════════════════
 
+  /** Skip opening+identify — show items as already identified (re-search). */
+  _skipToReady() {
+    this._title.setText('Items found');
+    this._phase = 'ready';
+
+    this._revealedItems = this.target.lootItems.map(type => ({
+      type, identified: true, taken: false,
+    }));
+
+    if (this._revealedItems.length === 0) {
+      this._title.setText('Empty');
+      return;
+    }
+
+    this._drawRows();
+    this._revealedItems.forEach((_, i) => this._refreshRow(i));
+  }
+
   _beginIdentify() {
     this._barBg.setVisible(false);
     this._barFill.setVisible(false);
     this._title.setText('Items found');
     this._phase = 'identifying';
+    this.target.opened = true;  // mark as opened for future re-searches
 
     this._revealedItems = this.target.lootItems.map(type => ({
       type,
@@ -264,6 +290,14 @@ export default class SearchScene extends Phaser.Scene {
     const item = this._revealedItems[this._selectedIdx];
     if (!item || item.taken) return;
 
+    // Can't take unidentified items
+    if (!item.identified) {
+      const row = this._itemRows[this._selectedIdx];
+      row.status.setText('???').setColor('#ffaa00');
+      this.time.delayedCall(600, () => { if (row.status.active) row.status.setText(''); });
+      return;
+    }
+
     if (!this.inventory.hasRoom(item.type)) {
       const row = this._itemRows[this._selectedIdx];
       row.status.setText('FULL').setColor('#ff3333');
@@ -278,7 +312,18 @@ export default class SearchScene extends Phaser.Scene {
 
   _tryClose() {
     if (this._phase === 'opening') return;
-    this.target.markSearched();
+
+    // Only mark as fully searched if ALL items were taken
+    const allTaken = this._revealedItems.length === 0 ||
+      this._revealedItems.every(i => i.taken);
+    if (allTaken) {
+      this.target.markSearched();
+    } else {
+      // Remove taken items from the target's loot list so only leftovers remain
+      this.target.lootItems = this._revealedItems
+        .filter(i => !i.taken)
+        .map(i => i.type);
+    }
     this._doClose();
   }
 

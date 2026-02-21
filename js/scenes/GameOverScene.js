@@ -25,22 +25,18 @@ export default class GameOverScene extends Phaser.Scene {
       fontFamily: 'monospace', fontSize: '24px', color: '#00ffcc',
     }).setOrigin(0.5);
 
-    const hint = this.add.text(cx, cy + 90, 'PRESS SPACE  or  A  TO RETRY', {
+    const hint = this.add.text(cx, cy + 90, 'PRESS ENTER  or  START  TO RETRY', {
       fontFamily: 'monospace', fontSize: '16px', color: '#666666',
     }).setOrigin(0.5);
 
     // Blink hint
     this.tweens.add({ targets: hint, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
 
-    // Input
-    this.input.keyboard.once('keydown-SPACE', () => this._restart());
-    if (this.input.gamepad.total > 0) {
-      this.input.gamepad.once('down', () => this._restart());
-    } else {
-      this.input.gamepad.on('connected', () => {
-        this.input.gamepad.once('down', () => this._restart());
-      });
-    }
+    // Input — Enter (keyboard) or Start (gamepad index 9)
+    this.input.keyboard.once('keydown-ENTER', () => this._restart());
+    this.input.gamepad.on('down', (pad, button) => {
+      if (button.index === 9) this._restart();
+    });
   }
 
   _restart() { this.scene.start('GameScene'); }

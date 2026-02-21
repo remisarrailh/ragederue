@@ -23,6 +23,7 @@ export default class Container {
     // ── Searchable properties ─────────────────────────────────────────────
     this.searchable = true;
     this.searched   = false;
+    this.opened     = false;   // true after first search (skip opening anim on re-search)
 
     // Generate loot
     const count = Phaser.Math.Between(CONTAINER_ITEM_COUNT.min, CONTAINER_ITEM_COUNT.max);
