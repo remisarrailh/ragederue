@@ -1,0 +1,11 @@
+{
+  "name": "RAGEDERUEonline",
+  "version": "0.1.0",
+  "description": "Beat-em-up / extraction game",
+  "scripts": {
+    "dev": "npx http-server . -p 8080 -c-1 --cors",
+    "server": "node server.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
