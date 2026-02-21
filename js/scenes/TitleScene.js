@@ -38,6 +38,7 @@ export default class TitleScene extends Phaser.Scene {
     const controls = [
       'WASD / Arrows ── Move',
       'Z ── Punch    X ── Kick    C ── Jab',
+      'SPACE ── Jump',
       'ESC / Start ── Pause',
     ];
     this.add.text(GAME_W / 2, GAME_H * 0.75, controls.join('\n'), {

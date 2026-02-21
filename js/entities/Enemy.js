@@ -4,6 +4,7 @@ import {
   LANE_TOP, LANE_BOTTOM
 } from '../config/constants.js';
 import { updateDepth, createShadow } from '../systems/DepthSystem.js';
+import { CORPSE_LOOT_TABLE, CORPSE_ITEM_COUNT, rollLoot } from '../config/lootTable.js';
 
 export default class Enemy extends Phaser.Physics.Arcade.Sprite {
   /**
@@ -281,18 +282,21 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     // SFX
     this.scene.sound.play('sfx_death_enemy');
 
-    // Play hurt — non-looping anim stays on last frame automatically → fade out
+    // Generate loot for this corpse
+    const count = Phaser.Math.Between(CORPSE_ITEM_COUNT.min, CORPSE_ITEM_COUNT.max);
+    this.lootItems = rollLoot(CORPSE_LOOT_TABLE, count); // array of type keys
+    this.searched  = false;  // true once player has searched this body
+    this.searchable = true;  // flag for the search system
+
+    // Play hurt anim — stays on last frame (corpse on ground)
     this.play('enemy_hurt', true);
     this.once('animationcomplete', () => {
-      this.scene.tweens.add({
-        targets: [this, this.shadow].filter(Boolean),
-        alpha: 0,
-        duration: 700,
-        onComplete: () => {
-          if (this.shadow) this.shadow.destroy();
-          this.destroy();
-        }
-      });
+      // Dim the corpse slightly to signal it’s dead but still there
+      this.setAlpha(0.65);
     });
   }
-}
+  /** Mark corpse as searched (called by SearchScene when player closes the loot UI). */
+  markSearched() {
+    this.searched = true;
+    this.setAlpha(0.35);
+  }}

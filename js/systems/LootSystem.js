@@ -1,46 +1,56 @@
-import Loot         from '../entities/Loot.js';
-import { LOOT_SPAWNS } from '../config/lootTable.js';
+import Container from '../entities/Container.js';
+import { CONTAINER_SPAWNS } from '../config/lootTable.js';
 
-const PICKUP_RADIUS = 48;   // px – generous for controller play
+const SEARCH_RADIUS = 64;   // px – distance to interact with a container/body
 
 export default class LootSystem {
   /** @param {Phaser.Scene} scene */
   constructor(scene) {
-    this.scene = scene;
-    this.items = [];        // active (not yet collected) Loot instances
+    this.scene      = scene;
+    this.containers = [];   // Container instances
+    /** Currently highlighted searchable target (or null) */
+    this.nearestTarget = null;
   }
 
-  /** Spawn every item defined in LOOT_SPAWNS. Call once from GameScene.create(). */
-  spawnAll() {
-    for (const def of LOOT_SPAWNS) {
-      this.items.push(new Loot(this.scene, def.x, def.y, def.type));
+  /** Spawn every container defined in CONTAINER_SPAWNS. Call once from GameScene.create(). */
+  spawnContainers() {
+    for (const def of CONTAINER_SPAWNS) {
+      this.containers.push(new Container(this.scene, def.x, def.y, def.texture));
     }
   }
 
-  /** Check proximity between player and each item; auto-collect on contact. */
-  update(player) {
-    for (let i = this.items.length - 1; i >= 0; i--) {
-      const loot = this.items[i];
-      if (loot.collected) {
-        this.items.splice(i, 1);
-        continue;
-      }
-      const dist = Phaser.Math.Distance.Between(player.x, player.y, loot.x, loot.y);
-      if (dist < PICKUP_RADIUS) {
-        loot.pickup(player);
-        // item removes itself from list next tick via collected flag
-      }
+  /**
+   * Each frame, find the nearest searchable target (container or dead enemy).
+   * Returns the target so GameScene can show a prompt / launch search UI.
+   * @param {object} player  Player entity
+   * @param {Array}  enemies All enemies (alive & dead)
+   * @returns {{ target: object, dist: number } | null}
+   */
+  update(player, enemies) {
+    let best = null;
+    let bestDist = SEARCH_RADIUS;
+
+    // Check containers
+    for (const c of this.containers) {
+      if (c.searched) continue;
+      const d = Phaser.Math.Distance.Between(player.x, player.y, c.x, c.y);
+      if (d < bestDist) { bestDist = d; best = c; }
     }
+
+    // Check dead enemies (corpses)
+    for (const e of enemies) {
+      if (e.state !== 'dead' || !e.searchable || e.searched) continue;
+      const d = Phaser.Math.Distance.Between(player.x, player.y, e.x, e.y);
+      if (d < bestDist) { bestDist = d; best = e; }
+    }
+
+    this.nearestTarget = best;
+    return best ? { target: best, dist: bestDist } : null;
   }
 
-  /** Number of ETH tokens still on the ground. */
-  get ethRemaining() {
-    return this.items.filter(l => l.lootType === 'ethereum' && !l.collected).length;
-  }
-
-  /** Destroy all remaining items (e.g. on scene shutdown). */
+  /** Destroy all containers (e.g. on scene shutdown). */
   destroyAll() {
-    this.items.forEach(l => l.destroy());
-    this.items = [];
+    this.containers.forEach(c => c.destroy());
+    this.containers = [];
   }
 }

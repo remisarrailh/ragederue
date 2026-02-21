@@ -2,6 +2,7 @@ import Player       from '../entities/Player.js';
 import Enemy        from '../entities/Enemy.js';
 import CombatSystem from '../systems/CombatSystem.js';
 import LootSystem   from '../systems/LootSystem.js';
+import Inventory    from '../systems/Inventory.js';
 import {
   GAME_W, GAME_H, WORLD_W,
   LANE_TOP, LANE_BOTTOM,
@@ -97,9 +98,12 @@ export default class GameScene extends Phaser.Scene {
 
     // No physical body collision — combat is handled by the hitbox system
 
-    // ── Loot ──────────────────────────────────────────────────────────────
+    // ── Inventory ─────────────────────────────────────────────────────────
+    this.inventory = new Inventory();
+
+    // ── Loot / Search system ──────────────────────────────────────────────
     this.lootSystem = new LootSystem(this);
-    this.lootSystem.spawnAll();
+    this.lootSystem.spawnContainers();
 
     // ── Input ─────────────────────────────────────────────────────────────
     this.cursors = this.input.keyboard.createCursorKeys();
@@ -111,7 +115,14 @@ export default class GameScene extends Phaser.Scene {
     };
 
     // ── HUD ───────────────────────────────────────────────────────────────
-    this.scene.launch('HUDScene', { player: this.player });
+    this.scene.launch('HUDScene', { player: this.player, inventory: this.inventory });
+
+    // ── Search prompt (world-space text) ──────────────────────────────────
+    this._searchPrompt = this.add.text(0, 0, '[E] Search', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#ffcc00',
+      stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(9999).setVisible(false);
+    this.tweens.add({ targets: this._searchPrompt, alpha: 0.4, duration: 600, yoyo: true, repeat: -1 });
 
     // ── Music ─────────────────────────────────────────────────────────────
     // Stop any leftover music from a previous run
@@ -120,10 +131,16 @@ export default class GameScene extends Phaser.Scene {
     this.bgMusic = this.sound.add('music_street', { loop: true, volume: savedVol });
     this.bgMusic.play();
 
+    // ── Interaction / Inventory keys ──────────────────────────────────────
+    this.input.keyboard.on('keydown-E',   () => this._interact());
+    this.input.keyboard.on('keydown-TAB', (e) => { e.preventDefault(); this._openInventory(); });
+
     // ── Pause input ───────────────────────────────────────────────────────
     this.input.keyboard.on('keydown-ESC', () => this._togglePause());
     this.input.gamepad.on('down', (pad, button) => {
-      if (button.index === 9) this._togglePause();   // Start button
+      if (button.index === 9) this._togglePause();       // Start
+      if (button.index === 3) this._interact();           // Y / Triangle
+      if (button.index === 8) this._openInventory();      // Select
     });
   }
 
@@ -144,11 +161,19 @@ export default class GameScene extends Phaser.Scene {
     this.enemies.forEach(e => e.update(this.player));
     this.combat.update([this.player, ...this.enemies]);
 
-    // ── Loot pickup ────────────────────────────────────────────────────────
-    this.lootSystem.update(this.player);
+    // ── Search proximity ───────────────────────────────────────────────────
+    const searchResult = this.lootSystem.update(this.player, this.enemies);
+    if (searchResult) {
+      this._searchPrompt.setVisible(true);
+      this._searchPrompt.setPosition(searchResult.target.x, (searchResult.target.y ?? searchResult.target.image?.y ?? this.player.y) - 60);
+    } else {
+      this._searchPrompt.setVisible(false);
+    }
 
     // ── Extraction check ───────────────────────────────────────────────────
     if (this.player.x >= EXTRACT_X) {
+      // Pass inventory total value as wallet for win screen
+      this.player.wallet = this.inventory.totalValue;
       this._endGame('win', '');
     }
 
@@ -228,5 +253,32 @@ export default class GameScene extends Phaser.Scene {
     this.scene.pause();
     this.scene.pause('HUDScene');
     this.scene.launch('PauseScene');
+  }
+
+  // ── Interact: search nearby container/corpse ─────────────────────────
+  _interact() {
+    if (this._gameEnded) return;
+    const target = this.lootSystem.nearestTarget;
+    if (!target) return;
+
+    this.sound.play('sfx_menu');
+    this.scene.pause();
+    this.scene.pause('HUDScene');
+    this.scene.launch('SearchScene', {
+      target,
+      inventory: this.inventory,
+    });
+  }
+
+  // ── Open inventory overlay ───────────────────────────────────────────
+  _openInventory() {
+    if (this._gameEnded) return;
+    this.sound.play('sfx_menu');
+    this.scene.pause();
+    this.scene.pause('HUDScene');
+    this.scene.launch('InventoryScene', {
+      inventory: this.inventory,
+      player:    this.player,
+    });
   }
 }

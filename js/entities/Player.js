@@ -1,6 +1,7 @@
 import {
   PLAYER_SPEED, LANE_TOP, LANE_BOTTOM,
-  PLAYER_MAX_HP, PLAYER_INVINCIBLE_MS
+  PLAYER_MAX_HP, PLAYER_INVINCIBLE_MS,
+  JUMP_DURATION, JUMP_HEIGHT
 } from '../config/constants.js';
 import { updateDepth, createShadow } from '../systems/DepthSystem.js';
 
@@ -8,15 +9,17 @@ import { updateDepth, createShadow } from '../systems/DepthSystem.js';
 // { offsetX, offsetY, width, height, damage, knockback }
 // offsetX is in front of the player (flipped automatically when facing left)
 const HITBOXES = {
-  player_punch: { offsetX: 48, offsetY: -22, w: 52, h: 30, dmg: 15, kb: 130 },
-  player_kick:  { offsetX: 55, offsetY: -16, w: 62, h: 28, dmg: 20, kb: 160 },
-  player_jab:   { offsetX: 42, offsetY: -22, w: 46, h: 28, dmg: 10, kb: 95  },
+  player_punch:     { offsetX: 48, offsetY: -22, w: 52, h: 30, dmg: 15, kb: 130 },
+  player_kick:      { offsetX: 55, offsetY: -16, w: 62, h: 28, dmg: 20, kb: 160 },
+  player_jab:       { offsetX: 42, offsetY: -22, w: 46, h: 28, dmg: 10, kb: 95  },
+  player_jump_kick: { offsetX: 50, offsetY: -10, w: 60, h: 34, dmg: 25, kb: 200 },
 };
 // Active frame index per attack (1-based, Phaser AnimationFrame.index)
 const ACTIVE_FRAMES = {
-  player_punch: [2],
-  player_kick:  [2, 3],
-  player_jab:   [2],
+  player_punch:     [2],
+  player_kick:      [2, 3],
+  player_jab:       [2],
+  player_jump_kick: [2],
 };
 
 export default class Player extends Phaser.Physics.Arcade.Sprite {
@@ -42,25 +45,29 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.combat = combat;
 
     // ── State machine ──────────────────────────────────────────────────────
-    this.state        = 'idle';   // idle | walk | punch | kick | jab | hurt
+    this.state        = 'idle';   // idle | walk | punch | kick | jab | jump | jump_kick | hurt
     this.isInvincible = false;
     this.facing       = 1;        // +1 = right, -1 = left
+    this._isAirborne  = false;    // true during jump arc
+    this._groundY     = y;        // memorised Y for landing
 
     // ── Keyboard attack keys ───────────────────────────────────────────────
-    // Z=punch  X=kick  C=jab  (no conflict with WASD or arrow keys)
+    // Z=punch  X=kick  C=jab  SPACE=jump
     this.attackKeys = {
       punch: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z),
       kick:  scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X),
       jab:   scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C),
+      jump:  scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
     };
 
     // ── Gamepad attack flags (set by 'down' event, consumed each frame) ────
-    this._gpAttack = { punch: false, kick: false, jab: false };
+    this._gpAttack = { punch: false, kick: false, jab: false, jump: false };
     scene.input.gamepad.on('down', (pad, button) => {
       if (pad.index !== 0) return;
       if (button.index === 2) this._gpAttack.punch = true; // Square / X
-      if (button.index === 0) this._gpAttack.kick  = true; // Cross  / A
+      if (button.index === 1) this._gpAttack.kick  = true; // Circle / B
       if (button.index === 3) this._gpAttack.jab   = true; // Triangle / Y
+      if (button.index === 0) this._gpAttack.jump  = true; // Cross / A
     });
 
     // ── Shadow ─────────────────────────────────────────────────────────────
@@ -89,6 +96,10 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
         this.state = 'idle';
         this.play('player_idle', true);
       }
+      // Jump kick : retombe après l'anim (ne reset pas idle, c'est le tween d'atterrissage qui le fait)
+      if (anim.key === 'player_jump_kick' && this.state === 'jump_kick') {
+        // stay in jump_kick state until landing
+      }
       // Pour hurt : on boucle l'anim jusqu'à la fin du stunlock
       if (anim.key === 'player_hurt' && this.state === 'hurt') {
         this.play('player_hurt', true);
@@ -104,6 +115,9 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       this.body.setVelocityY(0);
     } else if (['punch', 'kick', 'jab'].includes(this.state)) {
       this.setVelocity(0, 0);
+    } else if (this.state === 'jump' || this.state === 'jump_kick') {
+      // Airborne — keep horizontal momentum, no vertical input
+      this.body.setVelocityY(0);
     } else {
       this._handleMovement(cursors, wasd);
     }
@@ -156,25 +170,38 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
   _handleAttackInput() {
     // No attacks during hurt
     if (this.state === 'hurt') {
-      this._gpAttack.punch = this._gpAttack.kick = this._gpAttack.jab = false;
+      this._gpAttack.punch = this._gpAttack.kick = this._gpAttack.jab = this._gpAttack.jump = false;
       return;
     }
     // Kick has no chaining — wait for it to finish
     if (this.state === 'kick') {
-      this._gpAttack.punch = this._gpAttack.kick = this._gpAttack.jab = false;
+      this._gpAttack.punch = this._gpAttack.kick = this._gpAttack.jab = this._gpAttack.jump = false;
       return;
     }
 
     const punchDown = Phaser.Input.Keyboard.JustDown(this.attackKeys.punch) || this._gpAttack.punch;
     const kickDown  = Phaser.Input.Keyboard.JustDown(this.attackKeys.kick)  || this._gpAttack.kick;
     const jabDown   = Phaser.Input.Keyboard.JustDown(this.attackKeys.jab)   || this._gpAttack.jab;
+    const jumpDown  = Phaser.Input.Keyboard.JustDown(this.attackKeys.jump)  || this._gpAttack.jump;
 
     // Always consume flags
     this._gpAttack.punch = false;
     this._gpAttack.kick  = false;
     this._gpAttack.jab   = false;
+    this._gpAttack.jump  = false;
 
-    if (punchDown) {
+    // ── Airborne: allow jump kick ──────────────────────────────────────
+    if (this._isAirborne) {
+      if ((kickDown || punchDown) && this.state === 'jump') {
+        this._jumpKick();
+      }
+      return;
+    }
+
+    // ── Ground actions ─────────────────────────────────────────────
+    if (jumpDown && this.state !== 'punch' && this.state !== 'kick' && this.state !== 'jab') {
+      this._startJump();
+    } else if (punchDown) {
       this.state = 'punch';
       this.play('player_punch', true);
     } else if (kickDown) {
@@ -183,6 +210,49 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     } else if (jabDown) {
       this.state = 'jab';
       this.play('player_jab', true);
+    }
+  }
+
+  // ── Jump ─────────────────────────────────────────────────────────────
+  _startJump() {
+    this.state = 'jump';
+    this._isAirborne = true;
+    this._groundY = this.y;
+    this.play('player_jump', true);
+
+    // Keep current horizontal velocity for air momentum
+    this.body.setVelocityY(0);
+
+    // Arc ascent then descent
+    this.scene.tweens.add({
+      targets: this,
+      y: this._groundY - JUMP_HEIGHT,
+      duration: JUMP_DURATION * 0.45,
+      ease: 'Sine.easeOut',
+      onComplete: () => {
+        // Descent
+        this.scene.tweens.add({
+          targets: this,
+          y: this._groundY,
+          duration: JUMP_DURATION * 0.55,
+          ease: 'Sine.easeIn',
+          onComplete: () => this._land(),
+        });
+      },
+    });
+  }
+
+  _jumpKick() {
+    this.state = 'jump_kick';
+    this.play('player_jump_kick', true);
+  }
+
+  _land() {
+    this._isAirborne = false;
+    this.y = this._groundY;
+    if (this.state === 'jump' || this.state === 'jump_kick') {
+      this.state = 'idle';
+      this.play('player_idle', true);
     }
   }
 

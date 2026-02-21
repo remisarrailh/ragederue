@@ -10,7 +10,8 @@ export default class HUDScene extends Phaser.Scene {
   }
 
   init(data) {
-    this.player = data.player;
+    this.player    = data.player;
+    this.inventory = data.inventory;
   }
 
   create() {
@@ -42,6 +43,11 @@ export default class HUDScene extends Phaser.Scene {
       stroke: '#003322', strokeThickness: 2,
     }).setOrigin(1, 0.5).setScrollFactor(0).setDepth(501);
 
+    // ── Inventory indicator (below ETH) ─────────────────────────────────
+    this._invText = this.add.text(GAME_W - PAD, PAD + 22, '', {
+      fontFamily: 'monospace', fontSize: '10px', color: '#8888aa',
+    }).setOrigin(1, 0.5).setScrollFactor(0).setDepth(501);
+
     this._updateHP();
   }
 
@@ -61,9 +67,16 @@ export default class HUDScene extends Phaser.Scene {
     // Flash red under 30 s
     this._timerText.setColor(t < 30 ? (Math.floor(t * 4) % 2 === 0 ? '#ff2222' : '#ffaa00') : '#ffffff');
 
-    // ETH wallet
-    const eth = this.player.wallet ?? 0;
+    // ETH wallet — read from inventory total value
+    const eth = this.inventory ? this.inventory.totalValue : (this.player.wallet ?? 0);
     this._ethIcon.setText(`◆ ${eth} ETH`);
+
+    // Inventory slots
+    if (this.inventory) {
+      const used = this.inventory.items.length;
+      const max  = this.inventory.cols * this.inventory.rows;
+      this._invText.setText(`Bag: ${used} items  [TAB]`);
+    }
   }
 
   _updateHP() {
