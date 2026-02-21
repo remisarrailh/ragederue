@@ -5,12 +5,15 @@ import { ITEM_DEFS, SEARCH_OPEN_MS, SEARCH_IDENTIFY_MS } from '../config/lootTab
  * SearchScene — overlay shown when the player interacts with a searchable
  * container or enemy corpse.
  *
+ * The game keeps running underneath (enemies can attack, timer ticks).
+ * If the player gets hit, the search is interrupted and the scene closes.
+ *
  * Flow:
  *   1. "Opening" progress bar  (SEARCH_OPEN_MS)
  *   2. Items appear one by one, each starting as "?" then identified after
  *      SEARCH_IDENTIFY_MS.
  *   3. Player can take items (added to inventory) or leave them.
- *   4. Close when done — leftover items stay on the corpse/container.
+ *   4. Close when done — target marked as searched.
  */
 
 const BOX_W = 340;
@@ -18,7 +21,7 @@ const BOX_H = 260;
 const BOX_X = Math.round((GAME_W - BOX_W) / 2);
 const BOX_Y = Math.round((GAME_H - BOX_H) / 2) - 20;
 
-const ITEM_ROW_H  = 36;  // height of one item row
+const ITEM_ROW_H  = 36;
 const ITEM_START_Y = BOX_Y + 70;
 
 export default class SearchScene extends Phaser.Scene {
@@ -26,17 +29,15 @@ export default class SearchScene extends Phaser.Scene {
     super({ key: 'SearchScene' });
   }
 
-  /**
-   * @param {{ target: object, inventory: import('../systems/Inventory.js').default }} data
-   *   target    — Container or dead Enemy with .lootItems[]
-   *   inventory — Player inventory instance
-   */
   init(data) {
     this.target    = data.target;
     this.inventory = data.inventory;
+    this.player    = data.player;
   }
 
   create() {
+    const gp = this.registry.get('inputMode') === 'gp';
+
     // ── Overlay ─────────────────────────────────────────────────────────
     this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6);
 
@@ -57,18 +58,20 @@ export default class SearchScene extends Phaser.Scene {
       GAME_W / 2 - (BOX_W - 40) / 2, BOX_Y + 45, 0, 12, 0x33aaff
     ).setOrigin(0, 0.5);
 
-    // ── Hint ────────────────────────────────────────────────────────────
-    this._hint = this.add.text(GAME_W / 2, BOX_Y + BOX_H - 10, 'Z/A: take   X/B: leave   TAB/Select: close', {
+    // ── Hint (adaptive — updated each frame) ────────────────────────────
+    this._hint = this.add.text(GAME_W / 2, BOX_Y + BOX_H - 10, '', {
       fontFamily: 'monospace', fontSize: '9px', color: '#555577',
     }).setOrigin(0.5);
+    this._refreshHint();
 
     // State
-    this._phase = 'opening';        // 'opening' | 'identifying' | 'ready'
-    this._itemRows = [];             // UI rows for each loot item
+    this._phase = 'opening';
+    this._itemRows = [];
     this._selectedIdx = 0;
     this._identifyIdx = 0;
-    this._revealedItems = [];        // { type, identified }
+    this._revealedItems = [];
     this._cursor = null;
+    this._hpSnapshot = this.player.hp;  // to detect hits
 
     // ── Phase 1 — Opening bar ───────────────────────────────────────────
     this.tweens.add({
@@ -79,41 +82,70 @@ export default class SearchScene extends Phaser.Scene {
       onComplete: () => this._beginIdentify(),
     });
 
-    // ── Input ───────────────────────────────────────────────────────────
-    this.input.keyboard.on('keydown-TAB',   () => this._tryClose());
-    this.input.keyboard.on('keydown-ESC',   () => this._tryClose());
-    this.input.keyboard.on('keydown-UP',    () => this._moveSel(-1));
-    this.input.keyboard.on('keydown-DOWN',  () => this._moveSel(1));
-    this.input.keyboard.on('keydown-Z',     () => this._takeSelected());
-    this.input.keyboard.on('keydown-X',     () => this._leaveSelected());
+    // ── Keyboard input ──────────────────────────────────────────────────
+    this.input.keyboard.on('keydown-E',     () => { this.registry.set('inputMode', 'kb'); this._tryClose(); });
+    this.input.keyboard.on('keydown-TAB',   () => { this.registry.set('inputMode', 'kb'); this._tryClose(); });
+    this.input.keyboard.on('keydown-ESC',   () => { this.registry.set('inputMode', 'kb'); this._tryClose(); });
+    this.input.keyboard.on('keydown-UP',    () => { this.registry.set('inputMode', 'kb'); this._moveSel(-1); });
+    this.input.keyboard.on('keydown-DOWN',  () => { this.registry.set('inputMode', 'kb'); this._moveSel(1); });
+    this.input.keyboard.on('keydown-Z',     () => { this.registry.set('inputMode', 'kb'); this._takeSelected(); });
+    this.input.keyboard.on('keydown-X',     () => { this.registry.set('inputMode', 'kb'); });
 
+    // ── Gamepad input ───────────────────────────────────────────────────
     this._gpCooldown = 0;
     this.input.gamepad.on('down', (pad, button) => {
-      if (button.index === 8) this._tryClose();  // Select
+      this.registry.set('inputMode', 'gp');
       if (button.index === 0) this._takeSelected();   // A / Cross
-      if (button.index === 1) this._leaveSelected();  // B / Circle
+      if (button.index === 1) this._tryClose();        // B / Circle → CLOSE
+      if (button.index === 3) this._tryClose();        // Y / Triangle (same key as interact)
+      if (button.index === 8) this._tryClose();        // Select
     });
   }
 
   update(time, delta) {
-    // Gamepad d-pad
+    // ── Adaptive hint refresh ───────────────────────────────────────────
+    this._refreshHint();
+
+    // ── Hit interruption: if player took damage, abort search ───────────
+    if (this.player.hp < this._hpSnapshot || this.player.state === 'hurt') {
+      this._forceClose();
+      return;
+    }
+    this._hpSnapshot = this.player.hp;
+
+    // ── Gamepad d-pad navigation ────────────────────────────────────────
     this._gpCooldown -= delta;
-    const gp = this.input.gamepad;
-    if (gp && gp.total > 0 && this._gpCooldown <= 0) {
-      const pad = gp.getPad(0);
+    const gpInput = this.input.gamepad;
+    if (gpInput && gpInput.total > 0 && this._gpCooldown <= 0) {
+      const pad = gpInput.getPad(0);
       if (pad) {
         const DEAD = 0.4;
         let dy = 0;
         if (pad.up    || pad.leftStick.y < -DEAD) dy = -1;
         if (pad.down  || pad.leftStick.y >  DEAD) dy =  1;
-        if (dy) { this._moveSel(dy); this._gpCooldown = 180; }
+        if (dy) {
+          this.registry.set('inputMode', 'gp');
+          this._moveSel(dy);
+          this._gpCooldown = 180;
+        }
       }
     }
   }
 
-  // ═════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
+  //  Adaptive hint
+  // ═══════════════════════════════════════════════════════════════════════
+
+  _refreshHint() {
+    const gp = this.registry.get('inputMode') === 'gp';
+    this._hint.setText(gp
+      ? 'A: take   B: close'
+      : 'Z: take   E / TAB: close');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   //  Phase 2 — Identify items one by one
-  // ═════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
 
   _beginIdentify() {
     this._barBg.setVisible(false);
@@ -121,24 +153,19 @@ export default class SearchScene extends Phaser.Scene {
     this._title.setText('Items found');
     this._phase = 'identifying';
 
-    // Build the initial row list (all unknown)
     this._revealedItems = this.target.lootItems.map(type => ({
       type,
       identified: false,
       taken: false,
     }));
 
-    // If no loot, go straight to ready
     if (this._revealedItems.length === 0) {
       this._title.setText('Empty');
       this._phase = 'ready';
       return;
     }
 
-    // Draw all rows as "?"
     this._drawRows();
-
-    // Start identifying chain
     this._identifyIdx = 0;
     this._identifyNext();
   }
@@ -151,6 +178,7 @@ export default class SearchScene extends Phaser.Scene {
 
     const idx = this._identifyIdx;
     this.time.delayedCall(SEARCH_IDENTIFY_MS, () => {
+      if (!this.scene.isActive()) return; // scene may have closed
       this._revealedItems[idx].identified = true;
       this._refreshRow(idx);
       this._identifyIdx++;
@@ -158,9 +186,9 @@ export default class SearchScene extends Phaser.Scene {
     });
   }
 
-  // ═════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
   //  Row rendering
-  // ═════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
 
   _drawRows() {
     for (let i = 0; i < this._revealedItems.length; i++) {
@@ -184,7 +212,6 @@ export default class SearchScene extends Phaser.Scene {
       this._itemRows.push({ bg, icon, label, status, ry });
     }
 
-    // Cursor
     this._cursor = this.add.rectangle(GAME_W / 2, ITEM_START_Y, BOX_W - 16, ITEM_ROW_H - 2)
       .setStrokeStyle(2, 0xffffff, 0.9).setFillStyle(0xffffff, 0.05);
     this.tweens.add({ targets: this._cursor, alpha: 0.5, duration: 400, yoyo: true, repeat: -1 });
@@ -198,8 +225,7 @@ export default class SearchScene extends Phaser.Scene {
     if (!row) return;
 
     if (item.taken) {
-      row.icon.setText('✓');
-      row.icon.setColor('#00cc44');
+      row.icon.setText('✓').setColor('#00cc44');
       row.label.setText('Taken').setColor('#44aa44');
       row.status.setText('');
       row.bg.setFillStyle(0x113311, 0.4);
@@ -207,30 +233,24 @@ export default class SearchScene extends Phaser.Scene {
       const def = ITEM_DEFS[item.type];
       if (def.texture && this.textures.exists(def.texture)) {
         row.icon.setVisible(false);
-        const img = this.add.image(row.icon.x, row.ry, def.texture)
-          .setDisplaySize(24, 24);
-        row._img = img;
+        this.add.image(row.icon.x, row.ry, def.texture).setDisplaySize(24, 24);
       } else {
         row.icon.setText(item.type.charAt(0).toUpperCase()).setColor(
           '#' + def.glowColor.toString(16).padStart(6, '0')
         );
       }
       row.label.setText(def.description).setColor('#cccccc');
-    } else {
-      row.icon.setText('?').setColor('#666');
-      row.label.setText('???').setColor('#888');
     }
   }
 
   _updateCursorPos() {
     if (!this._cursor || this._itemRows.length === 0) return;
-    const ry = ITEM_START_Y + this._selectedIdx * ITEM_ROW_H;
-    this._cursor.setY(ry);
+    this._cursor.setY(ITEM_START_Y + this._selectedIdx * ITEM_ROW_H);
   }
 
-  // ═════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
   //  User actions
-  // ═════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
 
   _moveSel(dir) {
     if (this._phase === 'opening') return;
@@ -244,34 +264,31 @@ export default class SearchScene extends Phaser.Scene {
     const item = this._revealedItems[this._selectedIdx];
     if (!item || item.taken) return;
 
-    // Check inventory space
     if (!this.inventory.hasRoom(item.type)) {
-      // Flash the row red briefly
       const row = this._itemRows[this._selectedIdx];
       row.status.setText('FULL').setColor('#ff3333');
       this.time.delayedCall(800, () => { if (row.status.active) row.status.setText(''); });
       return;
     }
 
-    // Add to inventory (identified = whatever it is now)
     this.inventory.addItem(item.type, item.identified);
     item.taken = true;
     this._refreshRow(this._selectedIdx);
   }
 
-  _leaveSelected() {
-    // Visual feedback — skip / nothing to do
+  _tryClose() {
+    if (this._phase === 'opening') return;
+    this.target.markSearched();
+    this._doClose();
   }
 
-  _tryClose() {
-    if (this._phase === 'opening') return; // can't close during opening anim
+  /** Forced close (hit interruption) — doesn't mark as searched, can retry. */
+  _forceClose() {
+    this._doClose();
+  }
 
-    // Mark the target as searched (removes the prompt)
-    this.target.markSearched();
-
-    // Remove taken items from the target's loot list (leftover stays for re-search? No — mark searched)
-    this.scene.resume('GameScene');
-    this.scene.resume('HUDScene');
+  _doClose() {
+    this.player.searching = false;
     this.scene.stop();
   }
 }

@@ -95,29 +95,35 @@ export default class InventoryScene extends Phaser.Scene {
       .setOrigin(0, 0.5).setVisible(false);
     this._isUsing = false;
 
-    // ── Hint ──────────────────────────────────────────────────────────────
-    this.add.text(GAME_W / 2, GAME_H - 20, 'Arrows/D-Pad: navigate   Z/A: use   TAB/Select: close', {
+    // ── Hint (adaptive — updated each frame) ──────────────────────────────
+    this._hintText = this.add.text(GAME_W / 2, GAME_H - 20, '', {
       fontFamily: 'monospace', fontSize: '10px', color: '#666666',
     }).setOrigin(0.5);
+    this._refreshHint();
 
     // ── Input ─────────────────────────────────────────────────────────────
-    this.input.keyboard.on('keydown-TAB', () => this._close());
-    this.input.keyboard.on('keydown-ESC', () => this._close());
-    this.input.keyboard.on('keydown-LEFT',  () => this._move(-1, 0));
-    this.input.keyboard.on('keydown-RIGHT', () => this._move(1, 0));
-    this.input.keyboard.on('keydown-UP',    () => this._move(0, -1));
-    this.input.keyboard.on('keydown-DOWN',  () => this._move(0, 1));
-    this.input.keyboard.on('keydown-Z',     () => this._useSelected());
+    this.input.keyboard.on('keydown-TAB', () => { this.registry.set('inputMode', 'kb'); this._close(); });
+    this.input.keyboard.on('keydown-ESC', () => { this.registry.set('inputMode', 'kb'); this._close(); });
+    this.input.keyboard.on('keydown-LEFT',  () => { this.registry.set('inputMode', 'kb'); this._move(-1, 0); });
+    this.input.keyboard.on('keydown-RIGHT', () => { this.registry.set('inputMode', 'kb'); this._move(1, 0); });
+    this.input.keyboard.on('keydown-UP',    () => { this.registry.set('inputMode', 'kb'); this._move(0, -1); });
+    this.input.keyboard.on('keydown-DOWN',  () => { this.registry.set('inputMode', 'kb'); this._move(0, 1); });
+    this.input.keyboard.on('keydown-Z',     () => { this.registry.set('inputMode', 'kb'); this._useSelected(); });
 
     // Gamepad
     this._gpCooldown = 0;
     this.input.gamepad.on('down', (pad, button) => {
+      this.registry.set('inputMode', 'gp');
       if (button.index === 8) this._close();      // Select
+      if (button.index === 1) this._close();      // B / Circle
       if (button.index === 0) this._useSelected(); // A / Cross
     });
   }
 
   update(time, delta) {
+    // Adaptive hint refresh
+    this._refreshHint();
+
     // Gamepad D-pad navigation with repeat cooldown
     this._gpCooldown -= delta;
     const gp = this.input.gamepad;
@@ -131,6 +137,7 @@ export default class InventoryScene extends Phaser.Scene {
         if (pad.up    || pad.leftStick.y < -DEAD) dy = -1;
         if (pad.down  || pad.leftStick.y >  DEAD) dy = 1;
         if (dx || dy) {
+          this.registry.set('inputMode', 'gp');
           this._move(dx, dy);
           this._gpCooldown = 180;
         }
@@ -139,6 +146,13 @@ export default class InventoryScene extends Phaser.Scene {
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
+
+  _refreshHint() {
+    const gp = this.registry.get('inputMode') === 'gp';
+    this._hintText.setText(gp
+      ? 'D-Pad: navigate   A: use   B: close'
+      : 'Arrows: navigate   Z: use   TAB: close');
+  }
 
   _move(dx, dy) {
     if (this._isUsing) return;

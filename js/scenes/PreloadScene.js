@@ -5,7 +5,7 @@ const BG = 'assets/Spritesheets/Brawler Girl/';
 const EP = 'assets/Spritesheets/Enemy Punk/';
 const ST = 'assets/Stage Layers/';
 const PR = 'assets/Stage Layers/props/';
-const SP = 'assets/sprites/';
+const SP = 'assets/Sprites/';
 
 export default class PreloadScene extends Phaser.Scene {
   constructor() {

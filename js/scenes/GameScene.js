@@ -31,6 +31,9 @@ export default class GameScene extends Phaser.Scene {
     this._gameEnded = false;
     this.runTimer   = RUN_TIMER;
 
+    // ── Input mode tracking (keyboard / gamepad) ──────────────────────────
+    this.registry.set('inputMode', 'kb');
+
     // ── World bounds ───────────────────────────────────────────────────────
     this.physics.world.setBounds(0, 0, WORLD_W, GAME_H);
     this.cameras.main.setBounds(0, 0, WORLD_W, GAME_H);
@@ -118,7 +121,7 @@ export default class GameScene extends Phaser.Scene {
     this.scene.launch('HUDScene', { player: this.player, inventory: this.inventory });
 
     // ── Search prompt (world-space text) ──────────────────────────────────
-    this._searchPrompt = this.add.text(0, 0, '[E] Search', {
+    this._searchPrompt = this.add.text(0, 0, '', {
       fontFamily: 'monospace', fontSize: '11px', color: '#ffcc00',
       stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(9999).setVisible(false);
@@ -132,12 +135,14 @@ export default class GameScene extends Phaser.Scene {
     this.bgMusic.play();
 
     // ── Interaction / Inventory keys ──────────────────────────────────────
-    this.input.keyboard.on('keydown-E',   () => this._interact());
-    this.input.keyboard.on('keydown-TAB', (e) => { e.preventDefault(); this._openInventory(); });
+    this.input.keyboard.on('keydown-E',   () => { this.registry.set('inputMode', 'kb'); this._interact(); });
+    this.input.keyboard.on('keydown-TAB', (e) => { e.preventDefault(); this.registry.set('inputMode', 'kb'); this._openInventory(); });
 
     // ── Pause input ───────────────────────────────────────────────────────
-    this.input.keyboard.on('keydown-ESC', () => this._togglePause());
+    this.input.keyboard.on('keydown-ESC', () => { this.registry.set('inputMode', 'kb'); this._togglePause(); });
+    this.input.keyboard.on('keydown', () => { this.registry.set('inputMode', 'kb'); });
     this.input.gamepad.on('down', (pad, button) => {
+      this.registry.set('inputMode', 'gp');
       if (button.index === 9) this._togglePause();       // Start
       if (button.index === 3) this._interact();           // Y / Triangle
       if (button.index === 8) this._openInventory();      // Select
@@ -164,6 +169,8 @@ export default class GameScene extends Phaser.Scene {
     // ── Search proximity ───────────────────────────────────────────────────
     const searchResult = this.lootSystem.update(this.player, this.enemies);
     if (searchResult) {
+      const gp = this.registry.get('inputMode') === 'gp';
+      this._searchPrompt.setText(gp ? '[Y] Search' : '[E] Search');
       this._searchPrompt.setVisible(true);
       this._searchPrompt.setPosition(searchResult.target.x, (searchResult.target.y ?? searchResult.target.image?.y ?? this.player.y) - 60);
     } else {
@@ -217,7 +224,11 @@ export default class GameScene extends Phaser.Scene {
     if (this._gameEnded) return;
     this._gameEnded = true;
 
+    // Close any open overlay scenes
     this.scene.stop('HUDScene');
+    this.scene.stop('SearchScene');
+    this.scene.stop('InventoryScene');
+    this.player.searching = false;
 
     // Stop music before leaving
     if (this.bgMusic) {
@@ -258,21 +269,25 @@ export default class GameScene extends Phaser.Scene {
   // ── Interact: search nearby container/corpse ─────────────────────────
   _interact() {
     if (this._gameEnded) return;
+    if (this.player.searching) return;  // already searching
     const target = this.lootSystem.nearestTarget;
     if (!target) return;
 
     this.sound.play('sfx_menu');
-    this.scene.pause();
-    this.scene.pause('HUDScene');
+    // Game keeps running — player is frozen but enemies still move
+    this.player.searching = true;
+    this.player.setVelocity(0, 0);
     this.scene.launch('SearchScene', {
       target,
       inventory: this.inventory,
+      player: this.player,
     });
   }
 
   // ── Open inventory overlay ───────────────────────────────────────────
   _openInventory() {
     if (this._gameEnded) return;
+    if (this.player.searching) return;  // can't open inventory while searching
     this.sound.play('sfx_menu');
     this.scene.pause();
     this.scene.pause('HUDScene');

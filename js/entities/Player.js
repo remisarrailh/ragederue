@@ -50,6 +50,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.facing       = 1;        // +1 = right, -1 = left
     this._isAirborne  = false;    // true during jump arc
     this._groundY     = y;        // memorised Y for landing
+    this.searching    = false;    // true while SearchScene is open
 
     // ── Keyboard attack keys ───────────────────────────────────────────────
     // Z=punch  X=kick  C=jab  SPACE=jump
@@ -109,6 +110,16 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
   // ─────────────────────────────────────────────────────── update ──────────
   update(cursors, wasd) {
+    // Frozen while searching a container / corpse
+    if (this.searching) {
+      this.setVelocity(0, 0);
+      if (this.state !== 'idle' && this.state !== 'hurt') {
+        this.state = 'idle';
+        this.play('player_idle', true);
+      }
+      return;
+    }
+
     if (this.state === 'hurt') {
       // Let knockback decay — dampen X, zero Y
       this.body.setVelocityX(this.body.velocity.x * 0.78);

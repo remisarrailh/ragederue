@@ -74,8 +74,8 @@ export default class HUDScene extends Phaser.Scene {
     // Inventory slots
     if (this.inventory) {
       const used = this.inventory.items.length;
-      const max  = this.inventory.cols * this.inventory.rows;
-      this._invText.setText(`Bag: ${used} items  [TAB]`);
+      const gp = this.registry.get('inputMode') === 'gp';
+      this._invText.setText(`Bag: ${used} items  [${gp ? 'Select' : 'TAB'}]`);
     }
   }
 
