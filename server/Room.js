@@ -5,37 +5,15 @@
  * cycle begins.  The room is NEVER destroyed — it stays alive even with 0 players.
  */
 
-const Protocol = require('./Protocol');
-const ServerEnemy = require('./ServerEnemy');
+const Protocol    = require('./Protocol');
+const Broadcaster = require('./Broadcaster');
+const { WaveSpawner, MAX_ENEMIES } = require('./WaveSpawner');
 
 const TICK_RATE = 20; // Hz
 const TICK_MS   = 1000 / TICK_RATE;
 
 // ── World timer (seconds) ──────────────────────────────────────────────────
 const RUN_TIMER = 600;  // mirrors client lootTable.js
-
-// ── Enemy spawn definitions ────────────────────────────────────────────────
-const ENEMY_SPAWNS = [
-  { x: 400,  y: 410, cfg: {} },
-  { x: 650,  y: 380, cfg: {} },
-  { x: 900,  y: 440, cfg: {} },
-  { x: 1100, y: 395, cfg: {} },
-  { x: 1400, y: 450, cfg: { hp: 80, speed: 80 } },
-  { x: 1700, y: 385, cfg: {} },
-  { x: 2000, y: 430, cfg: { hp: 80, speed: 80 } },
-  { x: 2400, y: 400, cfg: {} },
-  { x: 2800, y: 445, cfg: { hp: 100, speed: 70 } },
-  { x: 3200, y: 390, cfg: {} },
-];
-
-// ── Wave spawner config ────────────────────────────────────────────────────
-const WAVE_INTERVAL_MS = 10_000;
-const WAVE_MIN = 1;
-const WAVE_MAX = 3;
-const MAX_ENEMIES = 30;
-const LANE_TOP = 330;
-const LANE_BOTTOM = 470;
-const EXTRACT_X = 3500;
 
 // ── Container spawn definitions ────────────────────────────────────────────
 const CONTAINER_SPAWNS = [
@@ -99,9 +77,6 @@ class Room {
     /** @type {number} Next enemy network ID */
     this._nextEnemyId = 1;
 
-    /** @type {number} Accumulated time for wave spawner (ms) */
-    this._waveAccumulator = 0;
-
     /** @type {number} Accumulated time for timer sync broadcast (ms) */
     this._timerSyncAccumulator = 0;
 
@@ -111,10 +86,18 @@ class Room {
     /** @type {number} World timer countdown (seconds) */
     this.worldTimer = RUN_TIMER;
 
-    // Initial world population (no enemies at startup — waves handle spawning)
-    this._generateContainerLoot();
+    // ── Sub-systems ───────────────────────────────────────────────────────
+    this.broadcaster = new Broadcaster(this.players);
+    this.wavespawner = new WaveSpawner(() => this._nextEnemyId++);
 
-    // Start tick loop (runs forever, even with 0 players)
+    // ── Tick performance stats ────────────────────────────────────────────
+    this.stats = {
+      tickCount:    0,
+      tickTimeSum:  0,
+      tickTimeMax:  0,
+    };
+
+    this._generateContainerLoot();
     this._interval = setInterval(() => this._tick(), TICK_MS);
     console.log(`[Room ${this.name}] Created — world timer: ${this.worldTimer}s`);
   }
@@ -125,17 +108,17 @@ class Room {
     this.players.set(player.id, player);
 
     // Sync timer
-    this._sendTo(player, Protocol.encodeTimerSync(this.worldTimer));
+    this.broadcaster.sendTo(player, Protocol.encodeTimerSync(this.worldTimer));
 
     // Send existing container loot
     for (const c of this.containerLoot) {
-      this._sendTo(player, Protocol.encodeLootData(0, c.id, c.loot));
+      this.broadcaster.sendTo(player, Protocol.encodeLootData(0, c.id, c.loot));
     }
 
     // Send loot for any already-dead enemies
     for (const e of this.enemies) {
       if (e.state === 'dead' && e.lootItems && e.lootItems.length > 0) {
-        this._sendTo(player, Protocol.encodeLootData(1, e.netId, e.lootItems));
+        this.broadcaster.sendTo(player, Protocol.encodeLootData(1, e.netId, e.lootItems));
       }
     }
   }
@@ -155,7 +138,7 @@ class Room {
     if (died) {
       const count = randBetween(CORPSE_ITEM_COUNT.min, CORPSE_ITEM_COUNT.max);
       enemy.lootItems = rollLoot(CORPSE_LOOT_TABLE, count);
-      this.broadcast(Protocol.encodeLootData(1, enemy.netId, enemy.lootItems));
+      this.broadcaster.broadcast(Protocol.encodeLootData(1, enemy.netId, enemy.lootItems));
     }
   }
   // ── Loot management ─────────────────────────────────────────────────
@@ -189,32 +172,18 @@ class Room {
     }
 
     // Broadcast updated loot to ALL players
-    this.broadcast(Protocol.encodeLootData(targetKind, targetId, lootArray.loot));
-  }
-  // ── Networking helpers ─────────────────────────────────────────────────
-
-  /** Send data to a single player. */
-  _sendTo(player, data) {
-    if (player.ws.readyState === 1) {
-      const buf = data instanceof ArrayBuffer ? Buffer.from(data) : data;
-      player.ws.send(buf, { binary: true });
-    }
+    this.broadcaster.broadcast(Protocol.encodeLootData(targetKind, targetId, lootArray.loot));
   }
 
-  /** Broadcast to all (optionally exclude one id). */
-  broadcast(data, excludeId) {
-    const buf = data instanceof ArrayBuffer ? Buffer.from(data) : data;
-    for (const [id, p] of this.players) {
-      if (id === excludeId) continue;
-      if (p.ws.readyState === 1) {
-        p.ws.send(buf, { binary: true });
-      }
-    }
-  }
+  // ── Networking proxy (public interface used by index.js) ───────────────
+
+  broadcast(data, excludeId) { this.broadcaster.broadcast(data, excludeId); }
+  recordIncoming(byteLength) { this.broadcaster.recordIncoming(byteLength); }
 
   // ── Tick loop ──────────────────────────────────────────────────────────
 
   _tick() {
+    const tickStart = Date.now();
     const dtSec = TICK_MS / 1000;
 
     // ── World timer countdown (always ticking) ─────────────────────────
@@ -226,41 +195,42 @@ class Room {
 
     // ── If no players, scatter living enemies so they don't clump ───────
     const playerList = Array.from(this.players.values());
-    if (playerList.length === 0) {
-      this._scatterEnemies();
-      return;
+    const hasPlayers = playerList.length > 0;
+
+    if (!hasPlayers) this.wavespawner.scatter(this.enemies);
+
+    // Update enemies (only if players are present to chase)
+    if (hasPlayers) {
+      for (const e of this.enemies) e.update(TICK_MS, playerList);
     }
 
-    // Update enemies
-    for (const e of this.enemies) {
-      e.update(TICK_MS, playerList);
-    }
-
-    // Wave spawner (respect MAX_ENEMIES cap)
-    this._waveAccumulator += TICK_MS;
-    if (this._waveAccumulator >= WAVE_INTERVAL_MS) {
-      this._waveAccumulator -= WAVE_INTERVAL_MS;
-      this._spawnWave(playerList);
-    }
+    // Wave spawner (always runs, even with 0 players)
+    this.wavespawner.tick(TICK_MS, this.enemies, playerList);
 
     // Broadcast timer sync every ~1s
     this._timerSyncAccumulator += TICK_MS;
     if (this._timerSyncAccumulator >= 1000) {
       this._timerSyncAccumulator -= 1000;
-      this.broadcast(Protocol.encodeTimerSync(this.worldTimer));
+      this.broadcaster.broadcast(Protocol.encodeTimerSync(this.worldTimer));
     }
 
     // Build and send snapshots
-    const playerSnapshot = Protocol.encodeRoomSnapshot(playerList);
-    const playerBuf = Buffer.from(playerSnapshot);
-    const enemyBuf = Protocol.encodeEnemySnapshot(this.enemies);
+    const playerBuf = Buffer.from(Protocol.encodeRoomSnapshot(playerList));
+    const enemyBuf  = Protocol.encodeEnemySnapshot(this.enemies);
 
     for (const [, p] of this.players) {
-      if (p.ws.readyState === 1) {
-        p.ws.send(playerBuf, { binary: true });
-        p.ws.send(enemyBuf, { binary: true });
-      }
+      if (p.ws.readyState !== 1) continue;
+      p.ws.send(playerBuf, { binary: true });
+      p.ws.send(enemyBuf,  { binary: true });
+      this.broadcaster.bytesSent += playerBuf.length + enemyBuf.length;
+      this.broadcaster.msgsSent  += 2;
     }
+
+    // Track tick performance
+    const tickMs = Date.now() - tickStart;
+    this.stats.tickCount++;
+    this.stats.tickTimeSum += tickMs;
+    if (tickMs > this.stats.tickTimeMax) this.stats.tickTimeMax = tickMs;
   }
 
   // ── World reset ────────────────────────────────────────────────────────
@@ -274,19 +244,18 @@ class Room {
     // Clear enemies (no initial spawn — waves handle population)
     this.enemies = [];
     this._nextEnemyId = 1;
-    this._waveAccumulator = 0;
+    this.wavespawner.reset();
 
     // Regenerate container loot
     this.containerLoot = [];
     this._generateContainerLoot();
 
     // Broadcast reset to all connected players (with new timer)
-    const resetBuf = Protocol.encodeWorldReset(this.worldTimer);
-    this.broadcast(resetBuf);
+    this.broadcaster.broadcast(Protocol.encodeWorldReset(this.worldTimer));
 
     // Send new container loot to all
     for (const c of this.containerLoot) {
-      this.broadcast(Protocol.encodeLootData(0, c.id, c.loot));
+      this.broadcaster.broadcast(Protocol.encodeLootData(0, c.id, c.loot));
     }
 
     console.log(`[Room ${this.name}] World reset complete — ${this.enemies.length} enemies, ${this.containerLoot.length} containers`);
@@ -294,56 +263,51 @@ class Room {
 
   // ── Enemy spawning ─────────────────────────────────────────────────────
 
-  _spawnWave(players) {
-    // Count living enemies (exclude dead/corpses)
+  /** Return a snapshot of room stats for monitoring. */
+  getStats() {
+    const b = this.broadcaster;
+    const elapsed = (Date.now() - b._lastReset) / 1000 || 1;
     const alive = this.enemies.filter(e => e.state !== 'dead').length;
-    if (alive >= MAX_ENEMIES) return;
+    const dead  = this.enemies.length - alive;
+    const totalLoot = this.containerLoot.reduce((s, c) => s + c.loot.length, 0)
+      + this.enemies.reduce((s, e) => s + (e.lootItems ? e.lootItems.length : 0), 0);
 
-    let avgX = 0;
-    for (const p of players) avgX += p.x;
-    avgX /= players.length;
-
-    const budget = MAX_ENEMIES - alive;
-    const count = Math.min(budget, WAVE_MIN + Math.floor(Math.random() * (WAVE_MAX - WAVE_MIN + 1)));
-    for (let i = 0; i < count; i++) {
-      let sx;
-      if (Math.random() < 0.5) {
-        sx = avgX - 780 - Math.floor(Math.random() * 80);
-      } else {
-        sx = avgX + 960 + 300 + Math.floor(Math.random() * 80);
-      }
-      sx = Math.max(60, Math.min(EXTRACT_X - 120, sx));
-      const sy = LANE_TOP + 10 + Math.floor(Math.random() * (LANE_BOTTOM - LANE_TOP - 20));
-      const tough = Math.random() < 0.25;
-      const cfg = tough ? { hp: 100, speed: 70 } : {};
-      const e = new ServerEnemy(this._nextEnemyId++, sx, sy, cfg);
-      this.enemies.push(e);
-    }
+    return {
+      room: this.name,
+      players: this.players.size,
+      playerList: Array.from(this.players.values()).map(p => ({
+        id: p.id, name: p.name, x: Math.round(p.x), y: Math.round(p.y), hp: p.hp, state: p.state,
+      })),
+      enemiesAlive: alive,
+      enemiesDead: dead,
+      enemiesTotal: this.enemies.length,
+      maxEnemies: MAX_ENEMIES,
+      lootItems: totalLoot,
+      worldTimer: Math.round(this.worldTimer),
+      worldTimerMax: RUN_TIMER,
+      bandwidth: {
+        bytesSentTotal:  b.bytesSent,
+        bytesRecvTotal:  b.bytesReceived,
+        bytesSentPerSec: Math.round(b.bytesSent     / elapsed),
+        bytesRecvPerSec: Math.round(b.bytesReceived / elapsed),
+        msgsSentPerSec:  Math.round(b.msgsSent      / elapsed),
+        msgsRecvPerSec:  Math.round(b.msgsReceived  / elapsed),
+      },
+      tick: {
+        rate:  TICK_RATE,
+        avgMs: this.stats.tickCount ? +(this.stats.tickTimeSum / this.stats.tickCount).toFixed(2) : 0,
+        maxMs: this.stats.tickTimeMax,
+        count: this.stats.tickCount,
+      },
+    };
   }
 
-  /**
-   * Scatter living enemies evenly across the level when no players are present.
-   * Prevents clumping: resets patrol bounds around each enemy's new position.
-   */
-  _scatterEnemies() {
-    const living = this.enemies.filter(e => e.state !== 'dead');
-    if (living.length === 0) return;
-
-    const margin = 80;
-    const totalWidth = EXTRACT_X - margin * 2;
-    const spacing = totalWidth / living.length;
-
-    for (let i = 0; i < living.length; i++) {
-      const e = living[i];
-      e.x = margin + spacing * i + spacing * 0.5;
-      e.y = LANE_TOP + 10 + Math.floor(Math.random() * (LANE_BOTTOM - LANE_TOP - 20));
-      e.velX = 0;
-      e.velY = 0;
-      e.state = 'patrol';
-      e._patrolLeft  = e.x - 160;
-      e._patrolRight = e.x + 160;
-      e._patrolDir   = Math.random() < 0.5 ? 1 : -1;
-    }
+  /** Reset rolling stats counters. */
+  resetStats() {
+    this.broadcaster.resetStats();
+    this.stats.tickCount   = 0;
+    this.stats.tickTimeSum = 0;
+    this.stats.tickTimeMax = 0;
   }
 
   stop() {

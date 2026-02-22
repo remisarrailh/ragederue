@@ -40,13 +40,8 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     // Enemy Punk sprite is drawn facing LEFT natively, so flipX=true = facing right
     this.facing = 1;
 
-    // ── Network sync ──────────────────────────────────────────────────────
-    this.netId    = 0;     // assigned by GameScene
-    this.isRemote = false; // true for non-host enemy replicas
-
-    // ── Interpolation targets (used when isRemote) ────────────────────────
-    this._targetX = x;
-    this._targetY = y;
+    // ── Network id (assigned by GameScene) ────────────────────────────
+    this.netId = 0;
 
     // ── Patrol bounds (stay within 160px of spawn) ────────────────────────
     this.patrolLeft  = x - 160;
@@ -68,42 +63,34 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     });
 
     // ── Anim-complete transitions ─────────────────────────────────────────
-    this.on('animationcomplete', (anim) => {
-      if (!this.active) return;             // sprite was destroyed mid-anim
-      this.combat.deactivateHitboxes(this);
+    this.on('animationcomplete', (anim) => this._onAnimComplete(anim));
+  }
 
-      // Remote enemies: state is managed by server, skip local transitions
-      if (this.isRemote) return;
+  /** Overridable anim-complete handler — RemoteEnemy overrides this. */
+  _onAnimComplete(anim) {
+    if (!this.active) return;
+    this.combat.deactivateHitboxes(this);
 
-      if (anim.key === 'enemy_punch' && this.state === 'attack') {
-        this.state = 'chase';
-      }
-      // Knockdown : après l'anim hurt, rester au sol puis se relever
-      if (anim.key === 'enemy_hurt' && this.state === 'knockdown') {
-        this.setVelocity(0, 0);
-        // Figer sur la dernière frame de enemy_hurt pour éviter un currentFrame undefined
-        // (Phaser crash si le sprite est actif sans anim courante)
-        this.anims.pause();
-        this.scene.time.delayedCall(ENEMY_KNOCKDOWN_RECOVERY_MS, () => {
-          if (this.state === 'knockdown') {
-            this.isInvincible = false;
-            this.state = 'chase';
-            this.play('enemy_idle', true);
-          }
-        });
-      }
-    });
+    if (anim.key === 'enemy_punch' && this.state === 'attack') {
+      this.state = 'chase';
+    }
+    if (anim.key === 'enemy_hurt' && this.state === 'knockdown') {
+      this.setVelocity(0, 0);
+      this.anims.pause();
+      this.scene.time.delayedCall(ENEMY_KNOCKDOWN_RECOVERY_MS, () => {
+        if (this.state === 'knockdown') {
+          this.isInvincible = false;
+          this.state = 'chase';
+          this.play('enemy_idle', true);
+        }
+      });
+    }
   }
 
   // ────────────────────────────────────────────────────── update ──────────
   update(player) {
     if (this.state === 'dead') return;
 
-    // ── Remote mode: just interpolate, no AI ──────────────────────────────
-    if (this.isRemote) {
-      this._remoteUpdate();
-      return;
-    }
 
     this.attackCooldown -= this.scene.game.loop.delta;
 
@@ -150,14 +137,6 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
 
   takeHit(damage, knockback, fromX) {
     if (this.isInvincible || this.state === 'dead') return;
-
-    // Remote enemies: only play visual/audio feedback, server manages HP & state
-    if (this.isRemote) {
-      this.scene.sound.play('sfx_hit', { volume: this.scene.registry.get('sfxVol') ?? 0.5 });
-      this.setTint(0xff4444);
-      this.scene.time.delayedCall(150, () => this.clearTint());
-      return;
-    }
 
     this.hp -= damage;
 
@@ -262,71 +241,6 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
         this.setAngle(0);
       }
     });
-  }
-
-  // ─────────────────────────────────────────────── remote sync ──────────
-
-  /** Smooth interpolation for remote enemies (no AI). */
-  _remoteUpdate() {
-    const dt = this.scene.game.loop.delta / 1000;
-    const lerp = Math.min(1, 10 * dt);
-    this.x += (this._targetX - this.x) * lerp;
-    this.y += (this._targetY - this.y) * lerp;
-    this.y = Phaser.Math.Clamp(this.y, LANE_TOP, LANE_BOTTOM);
-    updateDepth(this);
-  }
-
-  /** Apply a state snapshot from the server (for remote enemies). */
-  applyNetState(data) {
-    this._targetX = data.x;
-    this._targetY = data.y;
-
-    // ── Already dead — only accept position/HP updates, no state changes ──
-    if (this.state === 'dead') {
-      this.hp = data.hp;
-      return;
-    }
-
-    // Facing
-    if (data.facing !== this.facing) {
-      this.facing = data.facing;
-      this.setFlipX(this.facing > 0);
-    }
-
-    // State change → animation
-    const oldState = this.state;
-    if (data.state !== oldState) {
-      if (data.state === 'dead') {
-        this._die(!!this._justCreated);  // silent if enemy was already dead when we joined
-        return;
-      }
-      this.state = data.state;
-      switch (data.state) {
-        case 'patrol':
-          this.play('enemy_idle', true);
-          break;
-        case 'chase':
-          this.play('enemy_walk', true);
-          break;
-        case 'attack':
-          this.play('enemy_punch', true);
-          break;
-        case 'hitstun':
-          this.setTint(0xff4444);
-          this.scene.time.delayedCall(200, () => {
-            if (this.active) this.clearTint();
-          });
-          break;
-        case 'knockdown':
-          this.play('enemy_hurt', true);
-          break;
-        default:
-          this.play('enemy_idle', true);
-      }
-    }
-
-    // HP update
-    this.hp = data.hp;
   }
 
   // ─────────────────────────────────────────────── private helpers ─────────
