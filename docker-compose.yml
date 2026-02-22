@@ -1,0 +1,7 @@
+version: "3.8"
+services:
+  ragederue-server:
+    build: .
+    ports:
+      - "9000:9000"
+    restart: unless-stopped

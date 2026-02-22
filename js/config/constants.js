@@ -27,7 +27,8 @@ export const JUMP_HEIGHT        = 80;    // pixels offset at peak
 export const ENEMY_SPEED        = 90;
 export const ENEMY_MAX_HP       = 60;
 export const ENEMY_CHASE_DIST   = 280;
-export const ENEMY_ATTACK_DIST  = 70;export const ENEMY_KNOCKDOWN_THRESHOLD  = 35;   // accumulated dmg before knockdown
+export const ENEMY_ATTACK_DIST  = 70;
+export const ENEMY_KNOCKDOWN_THRESHOLD  = 35;   // accumulated dmg before knockdown
 export const ENEMY_HITSTUN_MS           = 220;  // brief flinch duration
 export const ENEMY_KNOCKDOWN_RECOVERY_MS = 900; // time on ground before getting up
 // ─── Debug ────────────────────────────────────────────────────────────────
