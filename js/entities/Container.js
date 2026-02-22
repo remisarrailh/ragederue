@@ -10,11 +10,13 @@ export default class Container {
    * @param {number} x
    * @param {number} y
    * @param {string} texture  Preloaded image key (e.g. 'barrel')
+   * @param {object} [opts]   Options: { netId, skipLoot }
    */
-  constructor(scene, x, y, texture) {
+  constructor(scene, x, y, texture, opts = {}) {
     this.scene = scene;
     this.x     = x;
     this.y     = y;
+    this.netId = opts.netId ?? -1;
 
     // ── Visual ────────────────────────────────────────────────────────────
     this.image = scene.add.image(x, y, texture).setOrigin(0.5, 1);
@@ -25,9 +27,13 @@ export default class Container {
     this.searched   = false;
     this.opened     = false;   // true after first search (skip opening anim on re-search)
 
-    // Generate loot
-    const count = Phaser.Math.Between(CONTAINER_ITEM_COUNT.min, CONTAINER_ITEM_COUNT.max);
-    this.lootItems = rollLoot(CONTAINER_LOOT_TABLE, count);
+    // Generate loot (skipped in online mode — server sends loot data)
+    if (opts.skipLoot) {
+      this.lootItems = [];
+    } else {
+      const count = Phaser.Math.Between(CONTAINER_ITEM_COUNT.min, CONTAINER_ITEM_COUNT.max);
+      this.lootItems = rollLoot(CONTAINER_LOOT_TABLE, count);
+    }
   }
 
   /** Mark as searched — dim it to indicate it's been looted. */

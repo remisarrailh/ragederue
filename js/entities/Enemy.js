@@ -4,7 +4,6 @@ import {
   LANE_TOP, LANE_BOTTOM
 } from '../config/constants.js';
 import { updateDepth, createShadow } from '../systems/DepthSystem.js';
-import { CORPSE_LOOT_TABLE, CORPSE_ITEM_COUNT, rollLoot } from '../config/lootTable.js';
 
 export default class Enemy extends Phaser.Physics.Arcade.Sprite {
   /**
@@ -41,6 +40,14 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     // Enemy Punk sprite is drawn facing LEFT natively, so flipX=true = facing right
     this.facing = 1;
 
+    // ── Network sync ──────────────────────────────────────────────────────
+    this.netId    = 0;     // assigned by GameScene
+    this.isRemote = false; // true for non-host enemy replicas
+
+    // ── Interpolation targets (used when isRemote) ────────────────────────
+    this._targetX = x;
+    this._targetY = y;
+
     // ── Patrol bounds (stay within 160px of spawn) ────────────────────────
     this.patrolLeft  = x - 160;
     this.patrolRight = x + 160;
@@ -62,7 +69,11 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
 
     // ── Anim-complete transitions ─────────────────────────────────────────
     this.on('animationcomplete', (anim) => {
+      if (!this.active) return;             // sprite was destroyed mid-anim
       this.combat.deactivateHitboxes(this);
+
+      // Remote enemies: state is managed by server, skip local transitions
+      if (this.isRemote) return;
 
       if (anim.key === 'enemy_punch' && this.state === 'attack') {
         this.state = 'chase';
@@ -70,6 +81,9 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
       // Knockdown : après l'anim hurt, rester au sol puis se relever
       if (anim.key === 'enemy_hurt' && this.state === 'knockdown') {
         this.setVelocity(0, 0);
+        // Figer sur la dernière frame de enemy_hurt pour éviter un currentFrame undefined
+        // (Phaser crash si le sprite est actif sans anim courante)
+        this.anims.pause();
         this.scene.time.delayedCall(ENEMY_KNOCKDOWN_RECOVERY_MS, () => {
           if (this.state === 'knockdown') {
             this.isInvincible = false;
@@ -84,6 +98,12 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
   // ────────────────────────────────────────────────────── update ──────────
   update(player) {
     if (this.state === 'dead') return;
+
+    // ── Remote mode: just interpolate, no AI ──────────────────────────────
+    if (this.isRemote) {
+      this._remoteUpdate();
+      return;
+    }
 
     this.attackCooldown -= this.scene.game.loop.delta;
 
@@ -131,6 +151,14 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
   takeHit(damage, knockback, fromX) {
     if (this.isInvincible || this.state === 'dead') return;
 
+    // Remote enemies: only play visual/audio feedback, server manages HP & state
+    if (this.isRemote) {
+      this.scene.sound.play('sfx_hit', { volume: this.scene.registry.get('sfxVol') ?? 0.5 });
+      this.setTint(0xff4444);
+      this.scene.time.delayedCall(150, () => this.clearTint());
+      return;
+    }
+
     this.hp -= damage;
 
     if (this.hp <= 0) {
@@ -167,6 +195,7 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.setTint(0xff4444);
 
     this.scene.time.delayedCall(ENEMY_HITSTUN_MS, () => {
+      if (!this.active) return;
       if (this.state === 'hitstun') {
         this.clearTint();
         this.isInvincible = false;
@@ -206,6 +235,7 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
       duration: arcDuration * 0.4,
       ease: 'Sine.easeOut',
       onComplete: () => {
+        if (!this.active) return;
         // Phase 2 : retombée
         this.scene.tweens.add({
           targets: this,
@@ -213,6 +243,7 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
           duration: arcDuration * 0.6,
           ease: 'Sine.easeIn',
           onComplete: () => {
+            if (!this.active) return;
             // Impact au sol : stopper le mouvement horizontal
             this.setVelocity(0, 0);
           }
@@ -227,9 +258,75 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
       duration: arcDuration,
       ease: 'Linear',
       onComplete: () => {
+        if (!this.active) return;
         this.setAngle(0);
       }
     });
+  }
+
+  // ─────────────────────────────────────────────── remote sync ──────────
+
+  /** Smooth interpolation for remote enemies (no AI). */
+  _remoteUpdate() {
+    const dt = this.scene.game.loop.delta / 1000;
+    const lerp = Math.min(1, 10 * dt);
+    this.x += (this._targetX - this.x) * lerp;
+    this.y += (this._targetY - this.y) * lerp;
+    this.y = Phaser.Math.Clamp(this.y, LANE_TOP, LANE_BOTTOM);
+    updateDepth(this);
+  }
+
+  /** Apply a state snapshot from the server (for remote enemies). */
+  applyNetState(data) {
+    this._targetX = data.x;
+    this._targetY = data.y;
+
+    // ── Already dead — only accept position/HP updates, no state changes ──
+    if (this.state === 'dead') {
+      this.hp = data.hp;
+      return;
+    }
+
+    // Facing
+    if (data.facing !== this.facing) {
+      this.facing = data.facing;
+      this.setFlipX(this.facing > 0);
+    }
+
+    // State change → animation
+    const oldState = this.state;
+    if (data.state !== oldState) {
+      if (data.state === 'dead') {
+        this._die(!!this._justCreated);  // silent if enemy was already dead when we joined
+        return;
+      }
+      this.state = data.state;
+      switch (data.state) {
+        case 'patrol':
+          this.play('enemy_idle', true);
+          break;
+        case 'chase':
+          this.play('enemy_walk', true);
+          break;
+        case 'attack':
+          this.play('enemy_punch', true);
+          break;
+        case 'hitstun':
+          this.setTint(0xff4444);
+          this.scene.time.delayedCall(200, () => {
+            if (this.active) this.clearTint();
+          });
+          break;
+        case 'knockdown':
+          this.play('enemy_hurt', true);
+          break;
+        default:
+          this.play('enemy_idle', true);
+      }
+    }
+
+    // HP update
+    this.hp = data.hp;
   }
 
   // ─────────────────────────────────────────────── private helpers ─────────
@@ -273,31 +370,66 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.play('enemy_punch', true);
   }
 
-  _die() {
+  _die(silent = false) {
     this.state = 'dead';
     this.isInvincible = true;
     this.combat.deactivateHitboxes(this);
     this.setVelocity(0, 0);
 
-    // SFX
-    this.scene.sound.play('sfx_death_enemy', { volume: this.scene.registry.get('sfxVol') ?? 0.5 });
+    // Kill any in-progress knockback tweens so they don't interfere
+    this.scene.tweens.killTweensOf(this);
+    this.setAngle(0);
 
-    // Generate loot for this corpse
-    const count = Phaser.Math.Between(CORPSE_ITEM_COUNT.min, CORPSE_ITEM_COUNT.max);
-    this.lootItems = rollLoot(CORPSE_LOOT_TABLE, count); // array of type keys
-    this.searched  = false;  // true once player has searched this body
-    this.searchable = true;  // flag for the search system
-    this.opened     = false; // true after first search (skip opening anim on re-search)
+    // SFX (skip when enemy was already dead before we joined)
+    if (!silent) {
+      this.scene.sound.play('sfx_death_enemy', { volume: this.scene.registry.get('sfxVol') ?? 0.5 });
+    }
 
-    // Play hurt anim — stays on last frame (corpse on ground)
-    this.play('enemy_hurt', true);
-    this.once('animationcomplete', () => {
-      // Dim the corpse slightly to signal it’s dead but still there
+    // Server sends loot via S_LOOT_DATA
+    if (!this.lootItems || this.lootItems.length === 0) {
+      this.lootItems = [];
+    }
+    this.searched  = false;
+    this.searchable = true;
+    this.opened     = false;
+
+    if (silent) {
+      // Already dead when we joined - show last hurt frame as corpse
+      this.play('enemy_hurt', true);
+      // Jump to last frame and freeze
+      this.anims.setProgress(1);
+      this.anims.pause();
       this.setAlpha(0.65);
-    });
+    } else {
+      // Play hurt anim then freeze on last frame as corpse
+      this.play('enemy_hurt', true);
+      this.once('animationcomplete-enemy_hurt', () => {
+        if (!this.active) return;  // destroyed while anim played
+        this.anims.pause();        // freeze on last frame (enemy on the ground)
+        this.setAlpha(0.65);
+      });
+    }
+
+    // Ensure corpse depth is correct (update() bails early for dead)
+    updateDepth(this);
   }
   /** Mark corpse as searched (called by SearchScene when player closes the loot UI). */
   markSearched() {
     this.searched = true;
     this.setAlpha(0.35);
-  }}
+  }
+
+  /** Clean up shadow & tweens when this enemy is removed from the scene. */
+  destroy() {
+    if (this.shadow) {
+      this.shadow.destroy();
+      this.shadow = null;
+    }
+    // Kill any lingering tweens targeting this sprite
+    if (this.scene) {
+      this.scene.tweens.killTweensOf(this);
+    }
+    this.combat?.deactivateHitboxes(this);
+    super.destroy();
+  }
+}

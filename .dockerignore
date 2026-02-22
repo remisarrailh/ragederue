@@ -1,0 +1,8 @@
+node_modules
+assets
+js
+index.html
+plan.md
+tmpclaude-*
+.git
+*.md

@@ -14,9 +14,14 @@ export default class LootSystem {
 
   /** Spawn every container defined in CONTAINER_SPAWNS. Call once from GameScene.create(). */
   spawnContainers() {
-    for (const def of CONTAINER_SPAWNS) {
-      this.containers.push(new Container(this.scene, def.x, def.y, def.texture));
-    }
+    CONTAINER_SPAWNS.forEach((def, i) => {
+      this.containers.push(
+        new Container(this.scene, def.x, def.y, def.texture, {
+          netId: i,
+          skipLoot: true,   // server is loot authority
+        })
+      );
+    });
   }
 
   /**
@@ -52,5 +57,14 @@ export default class LootSystem {
   destroyAll() {
     this.containers.forEach(c => c.destroy());
     this.containers = [];
+  }
+
+  /** Reset all containers for a world reset cycle. */
+  resetContainers() {
+    this.containers.forEach(c => {
+      c.searched = false;
+      c.lootItems = [];
+    });
+    this.nearestTarget = null;
   }
 }

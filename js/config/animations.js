@@ -87,4 +87,14 @@ export function registerAnimations(anims) {
     frameRate: 12,
     repeat: 0
   });
+
+  // Static corpse sprite (dedicated dead.png)
+  // repeat: -1 keeps the single frame visible forever and avoids
+  // Phaser edge-case where a 1-frame anim completion corrupts AnimationState
+  anims.create({
+    key: 'enemy_dead',
+    frames: anims.generateFrameNumbers('enemy_dead', { start: 0, end: 0 }),
+    frameRate: 1,
+    repeat: -1
+  });
 }

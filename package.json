@@ -4,8 +4,13 @@
   "description": "Beat-em-up / extraction game",
   "scripts": {
     "dev": "npx http-server . -p 8080 -c-1 --cors",
-    "server": "node server.js"
+    "server": "node server/index.js",
+    "start": "concurrently \"npm run server\" \"npm run dev\""
   },
-  "dependencies": {},
-  "devDependencies": {}
+  "dependencies": {
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
 }

@@ -1,8 +1,10 @@
-import Player       from '../entities/Player.js';
-import Enemy        from '../entities/Enemy.js';
-import CombatSystem from '../systems/CombatSystem.js';
-import LootSystem   from '../systems/LootSystem.js';
-import Inventory    from '../systems/Inventory.js';
+import Player         from '../entities/Player.js';
+import Enemy          from '../entities/Enemy.js';
+import CombatSystem   from '../systems/CombatSystem.js';
+import LootSystem     from '../systems/LootSystem.js';
+import Inventory      from '../systems/Inventory.js';
+import NetworkManager from '../network/NetworkManager.js';
+import RemotePlayer   from '../network/RemotePlayer.js';
 import {
   GAME_W, GAME_H, WORLD_W,
   LANE_TOP, LANE_BOTTOM,
@@ -15,26 +17,6 @@ const GROUND_Y   = 290;
 const FORE_DEPTH = LANE_BOTTOM + 50;
 const EXTRACT_W  = 120;
 
-// Enemy spawn definitions  { x, y, cfg }
-const ENEMY_SPAWNS = [
-  { x: 400,  y: 410, cfg: {} },
-  { x: 650,  y: 380, cfg: {} },
-  { x: 900,  y: 440, cfg: {} },
-  { x: 1100, y: 395, cfg: {} },
-  { x: 1400, y: 450, cfg: { hp: 80, speed: 80 } },
-  { x: 1700, y: 385, cfg: {} },
-  { x: 2000, y: 430, cfg: { hp: 80, speed: 80 } },
-  { x: 2400, y: 400, cfg: {} },
-  { x: 2800, y: 445, cfg: { hp: 100, speed: 70 } },
-  { x: 3200, y: 390, cfg: {} },
-];
-
-// Wave spawner config
-const WAVE_INTERVAL  = 10_000; // ms between waves
-const WAVE_MIN       = 1;     // min enemies per wave
-const WAVE_MAX       = 3;     // max enemies per wave
-const SPAWN_MARGIN   = 300;   // px off-screen margin for spawn x
-
 export default class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -44,8 +26,86 @@ export default class GameScene extends Phaser.Scene {
     this._gameEnded = false;
     this.runTimer   = RUN_TIMER;
 
+    // ── Pending loot buffer (for loot arriving before enemies are created) ──
+    this._pendingCorpseLoot = new Map();  // netId → items[]
+
     // ── Input mode tracking (keyboard / gamepad) ──────────────────────────
     this.registry.set('inputMode', 'kb');
+
+    // ── Network (always online) ───────────────────────────────────────────
+    this.net = new NetworkManager();
+    this.remotePlayers = new Map();
+    this.net.autoConnect('Player');
+
+    this.net.onWelcome = (id) => {
+      console.log(`[Game] Connected as player #${id}`);
+    };
+
+    this.net.onSnapshot = (players) => {
+      const seen = new Set();
+      for (const p of players) {
+        if (p.id === this.net.playerId) continue;
+        seen.add(p.id);
+        let rp = this.remotePlayers.get(p.id);
+        if (!rp) {
+          rp = new RemotePlayer(this, p.id, `Player ${p.id}`, p.x, p.y);
+          this.remotePlayers.set(p.id, rp);
+        }
+        rp.applySnapshot(p);
+      }
+      for (const [id, rp] of this.remotePlayers) {
+        if (!seen.has(id)) {
+          rp.destroy();
+          this.remotePlayers.delete(id);
+        }
+      }
+    };
+
+    this.net.onEnemySnapshot = (enemyData) => {
+      this._syncEnemiesFromServer(enemyData);
+    };
+
+    // Loot synchronisation — server is the authority on loot contents
+    this.net.onLootData = (targetKind, targetId, items) => {
+      if (targetKind === 0) { // container
+        const c = this.lootSystem.containers.find(c => c.netId === targetId);
+        if (c) c.lootItems = items;
+      } else { // corpse (1)
+        const e = this.enemies.find(e => e.netId === targetId);
+        if (e) {
+          e.lootItems = items;
+          e.searchable = true;
+          e.searched = false;
+        } else {
+          // Enemy not yet created — buffer for later
+          this._pendingCorpseLoot.set(targetId, items);
+        }
+      }
+    };
+
+    // Timer sync from server
+    this.net.onTimerSync = (remainingTime) => {
+      this.runTimer = remainingTime;
+    };
+
+    // World reset — server says the cycle is over, respawn everything
+    this.net.onWorldReset = (remainingTime) => {
+      console.log('[Game] World reset received — new timer:', remainingTime);
+      this._handleWorldReset(remainingTime);
+    };
+
+    this.net.onPlayerLeave = (id) => {
+      const rp = this.remotePlayers.get(id);
+      if (rp) {
+        rp.destroy();
+        this.remotePlayers.delete(id);
+      }
+    };
+
+    this.net.onDisconnect = () => {
+      console.log('[Game] Disconnected from server');
+      this._endGame('over', 'DISCONNECTED');
+    };
 
     // ── World bounds ───────────────────────────────────────────────────────
     this.physics.world.setBounds(0, 0, WORLD_W, GAME_H);
@@ -97,29 +157,23 @@ export default class GameScene extends Phaser.Scene {
     // ── Combat system ──────────────────────────────────────────────────────
     this.combat = new CombatSystem(this);
 
+    // Send hit events to server when player hits an enemy
+    this.combat.onHit = (owner, target, damage, knockback) => {
+      if (owner === this.player && target.netId != null) {
+        this.net.sendHitEnemy(target.netId, damage, knockback, owner.x);
+      }
+    };
+
     // ── Player ────────────────────────────────────────────────────────────
     this.player        = new Player(this, 150, LANE_BOTTOM - 10, this.combat);
     this.player.wallet = 0;
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
     // ── Enemies ───────────────────────────────────────────────────────────
-    this.enemies = ENEMY_SPAWNS.map(s =>
-      new Enemy(this, s.x, s.y, this.combat, s.cfg)
-    );
-
-    // ── Physics group ───────────────────────────────────────────────────
-    // Group allows Phaser to auto-clean destroyed enemies
+    this.enemies = [];
     this.enemiesGroup = this.physics.add.group();
-    this.enemies.forEach(e => this.enemiesGroup.add(e));
 
-    // No physical body collision — combat is handled by the hitbox system
-
-    // ── Wave spawner timer ────────────────────────────────────────────────
-    this._waveTimer = this.time.addEvent({
-      delay: WAVE_INTERVAL,
-      loop: true,
-      callback: () => this._spawnWave(),
-    });
+    // Enemies come from server — no local spawning
 
     // ── Inventory ─────────────────────────────────────────────────────────
     this.inventory = new Inventory();
@@ -149,8 +203,7 @@ export default class GameScene extends Phaser.Scene {
 
     // ── Music ─────────────────────────────────────────────────────────────
     // Stop any leftover music from a previous run
-    this.sound.stopByKey('music_street');
-    const savedVol = parseFloat(localStorage.getItem('RAGEDERUE_music_vol') ?? '0.5');
+    this.sound.stopByKey('music_street');    this.sound.stopByKey('music_naval');    const savedVol = parseFloat(localStorage.getItem('RAGEDERUE_music_vol') ?? '0.5');
     this.bgMusic = this.sound.add('music_street', { loop: true, volume: savedVol });
     this.bgMusic.play();
 
@@ -168,13 +221,23 @@ export default class GameScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-E',   () => { this.registry.set('inputMode', 'kb'); this._interact(); });
     this.input.keyboard.on('keydown-TAB', (e) => { e.preventDefault(); this.registry.set('inputMode', 'kb'); this._openInventory(); });
 
-    // ── Pause input ───────────────────────────────────────────────────────
-    this.input.keyboard.on('keydown-ESC', () => { this.registry.set('inputMode', 'kb'); this._togglePause(); });
+    // ── Pad index from registry (default 0) ─────────────────────────────
+    if (this.registry.get('padIndex') === undefined) {
+      const saved = parseInt(localStorage.getItem('RAGEDERUE_padIndex') ?? '0', 10);
+      this.registry.set('padIndex', saved);
+    }
+
+    // ── Pause / Settings input ───────────────────────────────────────
+    this.input.keyboard.on('keydown-ESC', () => { this.registry.set('inputMode', 'kb'); this._toggleSettings(); });
     this.input.keyboard.on('keydown', () => { this.registry.set('inputMode', 'kb'); });
     this.input.gamepad.on('down', (pad, button) => {
+      if (!document.hasFocus()) return;  // ignore when tab is not focused
+      const chosenPad = this.registry.get('padIndex') ?? 0;
+      if (chosenPad < 0) return;  // keyboard-only mode
+      if (pad.index !== chosenPad) return;
       this.registry.set('inputMode', 'gp');
-      if (this.player.searching) return;  // ignore GameScene input while search overlay is open
-      if (button.index === 9) this._togglePause();       // Start
+      if (this.player.searching || this.player.inMenu) return;  // ignore while overlay is open
+      if (button.index === 9) this._toggleSettings();       // Start
       if (button.index === 3) this._interact();           // Y / Triangle
       if (button.index === 8) this._openInventory();      // Select
     });
@@ -187,16 +250,12 @@ export default class GameScene extends Phaser.Scene {
     // ── Search cooldown tick ───────────────────────────────────────────
     if (this._searchCooldown > 0) this._searchCooldown -= delta;
 
-    // ── Timer countdown ────────────────────────────────────────────────────
-    this.runTimer -= delta / 1000;
-    if (this.runTimer <= 0) {
-      this.runTimer = 0;
-      return this._endGame('over', 'TIME UP');
-    }
+    // ── Timer (server-authoritative — only display, no local decrement) ──
 
     // ── Entities ───────────────────────────────────────────────────────────
     this.enemies = this.enemies.filter(e => e.active);
     this.player.update(this.cursors, this.wasd);
+    // Enemies are remote — interpolate snapshots from server
     this.enemies.forEach(e => e.update(this.player));
     this.combat.update([this.player, ...this.enemies]);
 
@@ -204,6 +263,9 @@ export default class GameScene extends Phaser.Scene {
     if (this.player.hp <= 0) {
       return this._endGame('over', 'DEAD');
     }
+
+    // ── HUD timer display ─────────────────────────────────────────────────
+    this.registry.set('runTimer', this.runTimer);
 
     // ── Search proximity ───────────────────────────────────────────────────
     const searchResult = this.lootSystem.update(this.player, this.enemies);
@@ -221,6 +283,18 @@ export default class GameScene extends Phaser.Scene {
       // Pass inventory total value as wallet for win screen
       this.player.wallet = this.inventory.totalValue;
       this._endGame('win', '');
+    }
+
+    // ── Network send ───────────────────────────────────────────────────────
+    this.net.sendState(
+      this.player.x, this.player.y,
+      this.player.body.velocity.x, this.player.body.velocity.y,
+      this.player.state, this.player.facing, this.player.hp
+    );
+
+    // ── Update remote players ──────────────────────────────────────────────
+    for (const [, rp] of this.remotePlayers) {
+      rp.update(time, delta);
     }
 
     // ── Parallax ───────────────────────────────────────────────────────────
@@ -263,11 +337,18 @@ export default class GameScene extends Phaser.Scene {
     if (this._gameEnded) return;
     this._gameEnded = true;
 
+    // Disconnect network
+    this.net.disconnect();
+    for (const [, rp] of this.remotePlayers) rp.destroy();
+    this.remotePlayers.clear();
+
     // Close any open overlay scenes
     this.scene.stop('HUDScene');
     this.scene.stop('SearchScene');
     this.scene.stop('InventoryScene');
+    this.scene.stop('PauseScene');
     this.player.searching = false;
+    this.player.inMenu = false;
 
     // Stop music before leaving
     if (this.bgMusic) {
@@ -289,38 +370,6 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  // ── Wave spawner ──────────────────────────────────────────────────────
-  _spawnWave() {
-    if (this._gameEnded) return;
-
-    const count = Phaser.Math.Between(WAVE_MIN, WAVE_MAX);
-    const camX  = this.cameras.main.scrollX;
-
-    for (let i = 0; i < count; i++) {
-      // Pick a random x that's off-screen (left or right of camera)
-      let sx;
-      if (Math.random() < 0.5) {
-        // Spawn to the left of the camera
-        sx = camX - SPAWN_MARGIN + Phaser.Math.Between(-80, 0);
-      } else {
-        // Spawn to the right of the camera
-        sx = camX + GAME_W + SPAWN_MARGIN + Phaser.Math.Between(0, 80);
-      }
-      // Clamp within world bounds (but away from extraction zone)
-      sx = Phaser.Math.Clamp(sx, 60, EXTRACT_X - 120);
-
-      const sy  = Phaser.Math.Between(LANE_TOP + 10, LANE_BOTTOM - 10);
-
-      // Occasionally spawn a tougher variant
-      const tough = Math.random() < 0.25;
-      const cfg   = tough ? { hp: 100, speed: 70 } : {};
-
-      const enemy = new Enemy(this, sx, sy, this.combat, cfg);
-      this.enemies.push(enemy);
-      this.enemiesGroup.add(enemy);
-    }
-  }
-
   _placeProp(key, wx, wy, scl) {
     const img = this.add.image(wx, wy, key).setOrigin(0.5, 1);
     if (scl !== undefined) img.setScale(scl);
@@ -328,9 +377,74 @@ export default class GameScene extends Phaser.Scene {
     return img;
   }
 
-  _togglePause() {
+  // ── Enemy sync (server-authoritative) ────────────────────────────────
+
+  _syncEnemiesFromServer(enemyData) {
+    const seen = new Set();
+
+    for (const data of enemyData) {
+      seen.add(data.netId);
+      // Find existing enemy by netId
+      let enemy = this.enemies.find(e => e.netId === data.netId);
+
+      if (!enemy) {
+        // Create remote enemy
+        enemy = new Enemy(this, data.x, data.y, this.combat, {});
+        enemy.netId = data.netId;
+        enemy.isRemote = true;
+        enemy._justCreated = true;  // flag: skip death SFX if already dead
+        this.enemies.push(enemy);
+        this.enemiesGroup.add(enemy);
+
+        // Apply any buffered corpse loot that arrived before this enemy existed
+        if (this._pendingCorpseLoot.has(data.netId)) {
+          enemy.lootItems  = this._pendingCorpseLoot.get(data.netId);
+          enemy.searchable = true;
+          enemy.searched   = false;
+          this._pendingCorpseLoot.delete(data.netId);
+        }
+      }
+      enemy.applyNetState(data);
+      enemy._justCreated = false;
+    }
+
+    // Remove enemies not in the snapshot
+    this.enemies = this.enemies.filter(e => {
+      if (seen.has(e.netId)) return true;
+      e.destroy();
+      return false;
+    });
+  }
+
+  // ── World reset (server cycle expired) ───────────────────────────────
+  _handleWorldReset(remainingTime) {
+    // Close overlay if open
+    if (this.scene.isActive('SearchScene')) {
+      this.player.searching = false;
+      this.scene.stop('SearchScene');
+    }
+
+    // Destroy all local enemies
+    for (const e of this.enemies) e.destroy();
+    this.enemies = [];
+    this.enemiesGroup.clear(true, true);
+    this._pendingCorpseLoot.clear();
+
+    // Reset containers (server will send fresh loot data)
+    this.lootSystem.resetContainers();
+
+    // Reset timer
+    this.runTimer = remainingTime;
+
+    // Reset player HP
+    this.player.hp = this.player.maxHp;
+
+    console.log('[Game] World reset complete — waiting for new enemies & loot from server');
+  }
+
+  _toggleSettings() {
     if (this._gameEnded) return;
-    // Close any overlay before pausing
+    // Close any overlay before opening settings
     if (this.scene.isActive('InventoryScene')) {
       this.player.inInventory = false;
       this.scene.stop('InventoryScene');
@@ -339,11 +453,16 @@ export default class GameScene extends Phaser.Scene {
       this.player.searching = false;
       this.scene.stop('SearchScene');
     }
+    // Toggle: if settings is already open, close it
+    if (this.scene.isActive('PauseScene')) {
+      this.player.inMenu = false;
+      this.scene.stop('PauseScene');
+      return;
+    }
     this.sound.play('sfx_menu', { volume: this.registry.get('sfxVol') ?? 0.5 });
-    if (this.bgMusic) this.bgMusic.pause();
-    this.scene.pause();
-    this.scene.pause('HUDScene');
-    this.scene.launch('PauseScene');
+    this.player.inMenu = true;
+    this.player.setVelocity(0, 0);
+    this.scene.launch('PauseScene', { fromScene: 'GameScene' });
   }
 
   // ── Interact: search nearby container/corpse ─────────────────────────
@@ -362,6 +481,7 @@ export default class GameScene extends Phaser.Scene {
       target,
       inventory: this.inventory,
       player: this.player,
+      net: this.net,
     });
   }
 

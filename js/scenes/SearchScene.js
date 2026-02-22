@@ -33,6 +33,12 @@ export default class SearchScene extends Phaser.Scene {
     this.target    = data.target;
     this.inventory = data.inventory;
     this.player    = data.player;
+    this.net       = data.net;      // NetworkManager for C_TAKE_ITEM
+
+    // Determine target kind + id for network messages
+    // Containers have an .image property; enemies don't
+    this._targetKind = this.target.image ? 0 : 1;  // 0=container, 1=corpse
+    this._targetId   = this.target.netId ?? 0;
   }
 
   create() {
@@ -308,21 +314,27 @@ export default class SearchScene extends Phaser.Scene {
     this.inventory.addItem(item.type, item.identified);
     item.taken = true;
     this._refreshRow(this._selectedIdx);
+
+    // Notify server so all players see the item removed
+    if (this.net) {
+      // Compute the server-side index (already-taken items have been removed
+      // from the server's array, so we count only non-taken items before us)
+      let serverIdx = 0;
+      for (let i = 0; i < this._selectedIdx; i++) {
+        if (!this._revealedItems[i].taken) serverIdx++;
+      }
+      this.net.sendTakeItem(this._targetKind, this._targetId, serverIdx);
+    }
   }
 
   _tryClose() {
     if (this._phase === 'opening') return;
 
-    // Only mark as fully searched if ALL items were taken
+    // Server is authoritative on loot — check remaining items
     const allTaken = this._revealedItems.length === 0 ||
       this._revealedItems.every(i => i.taken);
     if (allTaken) {
       this.target.markSearched();
-    } else {
-      // Remove taken items from the target's loot list so only leftovers remain
-      this.target.lootItems = this._revealedItems
-        .filter(i => !i.taken)
-        .map(i => i.type);
     }
     this._doClose();
   }

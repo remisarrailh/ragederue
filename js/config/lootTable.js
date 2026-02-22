@@ -77,7 +77,7 @@ export const SEARCH_OPEN_MS       = 800;   // time to open a container/body
 export const SEARCH_IDENTIFY_MS   = 600;   // time to identify each item inside
 
 // ── Run parameters ────────────────────────────────────────────────────────
-export const RUN_TIMER = 120;   // seconds
+export const RUN_TIMER = 6400;   // seconds
 export const EXTRACT_X = 3500;  // player.x threshold to trigger extraction
 
 // ── Container spawn positions ─────────────────────────────────────────────

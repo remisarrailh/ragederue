@@ -4,6 +4,8 @@ export default class CombatSystem {
   constructor(scene) {
     this.scene = scene;
     this.activeHitboxes = [];
+    /** Optional callback: (owner, target, damage, knockback) => {} */
+    this.onHit = null;
 
     if (DEBUG_HITBOXES) {
       this.debugGfx = scene.add.graphics().setDepth(999);
@@ -48,6 +50,7 @@ export default class CombatSystem {
 
       for (const target of entities) {
         if (target === hit.owner) continue;
+        if (!target.active)       continue;   // destroyed mid-frame
         if (target.isInvincible)  continue;
         if (target.state === 'dead') continue;
 
@@ -68,6 +71,7 @@ export default class CombatSystem {
 
         if (Phaser.Geom.Intersects.RectangleToRectangle(hit.rect, targetRect)) {
           target.takeHit(hit.damage, hit.knockback, hit.owner.x);
+          if (this.onHit) this.onHit(hit.owner, target, hit.damage, hit.knockback);
           hit.used = true;
           break;
         }

@@ -66,8 +66,10 @@ export default class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('enemy_walk',  EP + 'walk.png',  { frameWidth: fw, frameHeight: fh });
     this.load.spritesheet('enemy_punch', EP + 'punch.png', { frameWidth: fw, frameHeight: fh });
     this.load.spritesheet('enemy_hurt',  EP + 'hurt.png',  { frameWidth: fw, frameHeight: fh });
+    this.load.spritesheet('enemy_dead',  EP + 'dead.png',  { frameWidth: fw, frameHeight: fh });
     // ── Music ──────────────────────────────────────────────────────────
     this.load.audio('music_street', 'assets/music/street.mp3');
+    this.load.audio('music_naval',  'assets/music/naval.mp3');
 
     // ── SFX ────────────────────────────────────────────────────────────
     this.load.audio('sfx_hit',          'assets/sounds/hit.wav');

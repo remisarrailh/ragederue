@@ -11,13 +11,15 @@ export default class PauseScene extends Phaser.Scene {
     super({ key: 'PauseScene' });
   }
 
-  create() {
+  create(data) {
+    this._fromScene = (data && data.fromScene) || 'GameScene';
+
     // ── Semi-transparent overlay ──────────────────────────────────────────
     this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.7)
       .setOrigin(0.5);
 
     // ── Title ─────────────────────────────────────────────────────────────
-    this.add.text(GAME_W / 2, GAME_H * 0.08, 'PAUSE', {
+    this.add.text(GAME_W / 2, GAME_H * 0.08, 'SETTINGS', {
       fontFamily: 'monospace',
       fontSize: '40px',
       color: '#ff6600',
@@ -52,7 +54,7 @@ export default class PauseScene extends Phaser.Scene {
     this._switchTab(TAB_CONTROLS);
 
     // ── Resume hint ───────────────────────────────────────────────────────
-    const hint = this.add.text(GAME_W / 2, GAME_H * 0.94, 'ESC / Start: resume   Q / L1: switch tab', {
+    const hint = this.add.text(GAME_W / 2, GAME_H * 0.94, 'ESC / Start: close   Q / L1: switch tab', {
       fontFamily: 'monospace', fontSize: '11px', color: '#888888',
     }).setOrigin(0.5);
     this.tweens.add({ targets: hint, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
@@ -74,7 +76,42 @@ export default class PauseScene extends Phaser.Scene {
   _buildControlsTab() {
     const grp = this._tabGroups[TAB_CONTROLS];
     const cx = GAME_W / 2;
-    const topY = GAME_H * 0.28;
+    const topY = GAME_H * 0.25;
+
+    // ── Controller selector ──────────────────────────────────────────────
+    const selectorLabel = this.add.text(cx, topY, 'CONTROLLER', {
+      fontFamily: 'monospace', fontSize: '14px', color: '#ff8800',
+    }).setOrigin(0.5);
+    grp.push(selectorLabel);
+
+    const currentPad = this.registry.get('padIndex') ?? 0;
+    this._padOptions = ['KEYBOARD', 'GAMEPAD 1', 'GAMEPAD 2', 'GAMEPAD 3', 'GAMEPAD 4'];
+    // padIndex: -1 = keyboard only, 0-3 = gamepad indices
+    this._padIdx = currentPad < 0 ? 0 : currentPad + 1; // index into _padOptions
+
+    const arrowLeft = this.add.text(cx - 120, topY + 26, '◄', {
+      fontFamily: 'monospace', fontSize: '20px', color: '#ff6600',
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    grp.push(arrowLeft);
+
+    const arrowRight = this.add.text(cx + 120, topY + 26, '►', {
+      fontFamily: 'monospace', fontSize: '20px', color: '#ff6600',
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    grp.push(arrowRight);
+
+    this._padLabel = this.add.text(cx, topY + 26, this._padOptions[this._padIdx], {
+      fontFamily: 'monospace', fontSize: '16px', color: '#ffffff',
+    }).setOrigin(0.5);
+    grp.push(this._padLabel);
+
+    arrowLeft.on('pointerdown', () => this._changePad(-1));
+    arrowRight.on('pointerdown', () => this._changePad(1));
+
+    // Gamepad D-pad left/right on controls tab to switch controller
+    this._ctrlGpCd = 0;
+
+    // ── Key/button reference ─────────────────────────────────────────────
+    const refY = topY + 64;
 
     const kbLines = [
       '── KEYBOARD ──',
@@ -86,7 +123,7 @@ export default class PauseScene extends Phaser.Scene {
       'SPACE              Jump',
       'E                  Search',
       'TAB                Inventory',
-      'ESC                Resume',
+      'ESC                Settings',
     ];
 
     const gpLines = [
@@ -98,20 +135,30 @@ export default class PauseScene extends Phaser.Scene {
       'Triangle(Y)        Search',
       'Cross   (A)        Jump',
       'Select             Inventory',
-      'Start              Resume',
+      'Start              Settings',
     ];
 
-    const kbText = this.add.text(cx, topY, kbLines.join('\n'), {
-      fontFamily: 'monospace', fontSize: '13px', color: '#cccccc',
-      align: 'left', lineSpacing: 4,
+    const kbText = this.add.text(cx, refY, kbLines.join('\n'), {
+      fontFamily: 'monospace', fontSize: '12px', color: '#cccccc',
+      align: 'left', lineSpacing: 3,
     }).setOrigin(0.5, 0);
     grp.push(kbText);
 
-    const gpText = this.add.text(cx, topY + kbText.height + 20, gpLines.join('\n'), {
-      fontFamily: 'monospace', fontSize: '13px', color: '#cccccc',
-      align: 'left', lineSpacing: 4,
+    const gpText = this.add.text(cx, refY + kbText.height + 14, gpLines.join('\n'), {
+      fontFamily: 'monospace', fontSize: '12px', color: '#cccccc',
+      align: 'left', lineSpacing: 3,
     }).setOrigin(0.5, 0);
     grp.push(gpText);
+  }
+
+  _changePad(dir) {
+    this._padIdx = Phaser.Math.Clamp(this._padIdx + dir, 0, this._padOptions.length - 1);
+    this._padLabel.setText(this._padOptions[this._padIdx]);
+
+    // Save: _padIdx 0 = keyboard (-1), 1-4 = gamepad 0-3
+    const padIndex = this._padIdx === 0 ? -1 : this._padIdx - 1;
+    this.registry.set('padIndex', padIndex);
+    localStorage.setItem('RAGEDERUE_padIndex', padIndex.toString());
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -129,8 +176,11 @@ export default class PauseScene extends Phaser.Scene {
       color: 0xff6600,
       tab: TAB_SOUND,
       apply: (vol) => {
-        const gs = this.scene.get('GameScene');
-        if (gs && gs.bgMusic) gs.bgMusic.setVolume(vol);
+        // Apply to whichever scene has bgMusic
+        for (const key of ['GameScene', 'TitleScene']) {
+          const s = this.scene.get(key);
+          if (s && s.bgMusic) s.bgMusic.setVolume(vol);
+        }
       },
     });
 
@@ -280,19 +330,35 @@ export default class PauseScene extends Phaser.Scene {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  //  Gamepad: adjust sliders (runs every frame)
+  //  Gamepad: adjust sliders / controller selector (runs every frame)
   // ═══════════════════════════════════════════════════════════════════════
 
   update(time, delta) {
-    // Only process gamepad slider control on SOUND tab
-    if (this._activeTab !== TAB_SOUND) return;
-    if (!this._sliders || this._sliders.length === 0) return;
     const gp = this.input.gamepad;
     if (!gp || gp.total === 0) return;
-    const pad = gp.getPad(0);
+    const pad = gp.getPad(0); // always use pad 0 for menu navigation
     if (!pad) return;
 
     const DEAD = 0.2;
+
+    // ── Controls tab: D-pad left/right to change controller ───────────
+    if (this._activeTab === TAB_CONTROLS) {
+      this._ctrlGpCd = (this._ctrlGpCd || 0) - delta;
+      let dir = 0;
+      if (pad.left  || pad.leftStick.x < -DEAD) dir = -1;
+      if (pad.right || pad.leftStick.x >  DEAD) dir =  1;
+      if (dir !== 0 && this._ctrlGpCd <= 0) {
+        this._changePad(dir);
+        this._ctrlGpCd = 250;
+      }
+      if (dir === 0) this._ctrlGpCd = 0;
+      return;
+    }
+
+    // ── Sound tab: slider controls ────────────────────────────────────
+    if (this._activeTab !== TAB_SOUND) return;
+    if (!this._sliders || this._sliders.length === 0) return;
+
     const SPEED = 0.8;
 
     // ── vertical: switch slider ───────────────────────────────────────
@@ -308,31 +374,31 @@ export default class PauseScene extends Phaser.Scene {
     if (vert === 0) this._gpVertCd = 0;
 
     // ── horizontal: adjust value ──────────────────────────────────────
-    let dir = 0;
-    if (pad.left)  dir = -1;
-    if (pad.right) dir =  1;
-    if (Math.abs(pad.leftStick.x) > DEAD) dir = pad.leftStick.x;
+    let hdir = 0;
+    if (pad.left)  hdir = -1;
+    if (pad.right) hdir =  1;
+    if (Math.abs(pad.leftStick.x) > DEAD) hdir = pad.leftStick.x;
 
-    if (dir !== 0) {
+    if (hdir !== 0) {
       const dt = delta / 1000;
       const s = this._sliders[this._activeSlider];
-      const nv = Phaser.Math.Clamp(s.vol + dir * SPEED * dt, 0, 1);
+      const nv = Phaser.Math.Clamp(s.vol + hdir * SPEED * dt, 0, 1);
       s.vol = nv;
       s.applyVol(nv);
     }
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  //  Resume
+  //  Close menu
   // ═══════════════════════════════════════════════════════════════════════
 
   _resume() {
-    const gameScene = this.scene.get('GameScene');
-    if (gameScene && gameScene.bgMusic) {
-      gameScene.bgMusic.resume();
+    if (this._fromScene === 'GameScene') {
+      const gameScene = this.scene.get('GameScene');
+      if (gameScene && gameScene.player) {
+        gameScene.player.inMenu = false;
+      }
     }
-    this.scene.resume('GameScene');
-    this.scene.resume('HUDScene');
     this.scene.stop();
   }
 }

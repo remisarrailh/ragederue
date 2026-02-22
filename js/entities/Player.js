@@ -52,6 +52,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this._groundY     = y;        // memorised Y for landing
     this.searching    = false;    // true while SearchScene is open
     this.inInventory  = false;    // true while InventoryScene is open
+    this.inMenu       = false;    // true while Settings/Pause menu is open
 
     // ── Keyboard attack keys ───────────────────────────────────────────────
     // X=punch  C=kick  V=jab  SPACE=jump
@@ -65,8 +66,11 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     // ── Gamepad attack flags (set by 'down' event, consumed each frame) ────
     this._gpAttack = { punch: false, kick: false, jab: false, jump: false };
     scene.input.gamepad.on('down', (pad, button) => {
-      if (pad.index !== 0) return;
-      if (this.searching || this.inInventory) return;  // ignore while overlay is open
+      if (!document.hasFocus()) return;  // ignore when tab is not focused
+      const chosenPad = this.scene.registry.get('padIndex') ?? 0;
+      if (chosenPad < 0) return;  // keyboard-only mode
+      if (pad.index !== chosenPad) return;
+      if (this.searching || this.inInventory || this.inMenu) return;  // ignore while overlay is open
       if (button.index === 2) this._gpAttack.punch = true; // Square / X
       if (button.index === 1) this._gpAttack.kick  = true; // Circle / B
       if (button.index === 3) this._gpAttack.jab   = true; // Triangle / Y
@@ -112,8 +116,8 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
   // ─────────────────────────────────────────────────────── update ──────────
   update(cursors, wasd) {
-    // Frozen while searching a container / corpse or in inventory
-    if (this.searching || this.inInventory) {
+    // Frozen while searching a container / corpse, in inventory, or in menu
+    if (this.searching || this.inInventory || this.inMenu) {
       this.setVelocity(0, 0);
       if (this.state !== 'idle' && this.state !== 'hurt') {
         this.state = 'idle';
@@ -293,9 +297,10 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
     // ── Gamepad ──────────────────────────────────────────────────────────
     let gpX = 0, gpY = 0;
+    const chosenPadMove = this.scene.registry.get('padIndex') ?? 0;
     const gp = this.scene.input.gamepad;
-    if (gp && gp.total > 0) {
-      const pad = gp.getPad(0);
+    if (chosenPadMove >= 0 && gp && gp.total > 0 && document.hasFocus()) {
+      const pad = gp.getPad(chosenPadMove);
       if (pad) {
         const DEAD = 0.15;
         if (Math.abs(pad.leftStick.x) > DEAD) gpX = pad.leftStick.x;
