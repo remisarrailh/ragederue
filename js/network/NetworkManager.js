@@ -69,7 +69,10 @@ export default class NetworkManager {
     const name   = params.get('name') || playerName;
     const room   = params.get('room') || 'street_01';
 
-    const url = `ws://${server}:${port}`;
+    // Use wss:// if ssl=true param, or if page served over HTTPS
+    const ssl = params.get('ssl') === 'true' || window.location.protocol === 'https:';
+    const protocol = ssl ? 'wss' : 'ws';
+    const url = `${protocol}://${server}:${port}`;
     this.connect(url, name, room);
     return true;
   }
