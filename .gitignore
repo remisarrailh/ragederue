@@ -1,2 +1,8 @@
-/plan.md
-/tmpclaude-c1e2-cwd
+# Dependencies
+node_modules/
+
+# Temp files
+tmpclaude-*
+
+# Notes
+plan.md
