@@ -18,12 +18,15 @@ export default class LootSystem {
    */
   spawnContainers(containers) {
     containers.forEach((def, i) => {
-      this.containers.push(
-        new Container(this.scene, def.x, def.y, def.texture, {
-          netId: i,
-          skipLoot: true,   // server is loot authority
-        })
-      );
+      const c = new Container(this.scene, def.x, def.y, def.texture, {
+        netId: i,
+        skipLoot: true,   // server is loot authority
+      });
+      if (def.isHideoutChest) {
+        c.isHideoutChest = true;
+        c.searched       = false;   // always interactable
+      }
+      this.containers.push(c);
     });
   }
 
@@ -40,7 +43,7 @@ export default class LootSystem {
 
     // Check containers
     for (const c of this.containers) {
-      if (c.searched) continue;
+      if (c.searched && !c.isHideoutChest) continue;
       const d = Phaser.Math.Distance.Between(player.x, player.y, c.x, c.y);
       if (d < bestDist) { bestDist = d; best = c; }
     }
@@ -65,7 +68,8 @@ export default class LootSystem {
   /** Reset all containers for a world reset cycle. */
   resetContainers() {
     this.containers.forEach(c => {
-      c.searched = false;
+      if (c.isHideoutChest) return;   // chest content managed by HideoutChestScene
+      c.searched  = false;
       c.lootItems = [];
     });
     this.nearestTarget = null;

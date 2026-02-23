@@ -1,30 +1,14 @@
 # Correctif
 
-##### 
 
-Les zones de collisions sont incorrectes (trop grande) ajouter une hitbox visible dans l'éditeur de niveau pour checker ça
 
-Resize des props consistant (pas lié au niveau mais à l'objet)
+# Compatibilité
 
-Ajouter la possibilités d'upload des props (et de les virer de la liste)
-
-Editeur de props séparé de l'éditeur de niveau (permet d'ajouter/supprimer)
-
-Collision actif globale pour les props (par objets par objets)
-
-Container dans Props (container est maintenant un attribut / type de container change la loot table actif)
-
-# 
+Jouable sur un téléphone / tablette ?
 
 # Planque:
 
-* Planque Niveau Spécial : La planque, ce niveau permet de stocker ces objets dans un coffre de manière persistante (le timer n'efface pas les objets dans la planque)
 * Ultérieurement il y aurait des améliorations de la planque qui nécessite des objets spécifiques
-* La planque est accessible au même endroit pour chaque joueur et commune (jeu coop)
-* Il n'y a pas d'ennemis ni de loots dans la planque
-* La nourriture /eau / vie se régénère automatiquement quand le joueur est dans la planque
-
-
 
 # Amélioration de la planque
 
@@ -38,7 +22,7 @@ Container dans Props (container est maintenant un attribut / type de container c
 
 # Points d'expériences
 
-Un système d'expérience permet d'améliorer ces capacités
+Un système d'expérience permet d'améliorer ces capacités / persistant sur le serveur!
 
 Donner des coups de points : + de points d'endurance / + dégats poings
 
@@ -52,8 +36,6 @@ Se soigner : Bonus soin
 
 
 
-
-
 # Armes
 
 * Batte
@@ -61,8 +43,6 @@ Se soigner : Bonus soin
 * Sabre
 * Pistolet
 * Fusil mitrailleur
-
-
 
 
 
@@ -74,15 +54,12 @@ Se soigner : Bonus soin
 * Tuer un ennemi spéciale
 * Poser un objet dans une zone
 
-
-
 # Jeu
 
+* Les zones de collisions sont incorrectes (trop grande) ajouter une hitbox visible dans l'éditeur de niveau pour checker ça
+* Un warp doit redirigé vers un autre warp d'un autre niveau , pas un niveau (si on rentre par une porte il faut qu'on puisse ressortir par la même porte
 
 
-## Survie
-
-* Les joueurs spawn dans leur planque au démarrage du jeu.
 
 # Serveur
 
@@ -92,30 +69,33 @@ Se soigner : Bonus soin
 
 
 
-# Personnage
-
-Un joueur au niveau du serveur à:
-
-* Un nom
-* Un inventaire qu'il garde même s'il quitte le jeu (inventaire perdu s'il meurt, son corps reste
-  avec le loot qu'il avait, il peut soit le récupérer soit un autre joueur peut le récupérer), c'est reset avec le timer du niveau
-
-
-
 # Editeur de niveau
 
-* Ajouter l'accès à un editeur de props depuis l'éditeur de niveau
+Editeur de props séparé de l'éditeur de niveau (permet d'ajouter/supprimer)
+
+Ajouter la possibilités d'upload des props (et de les virer de la liste)
+
+Collision actif globale pour les props (pas objets par objets)
 
 
+
+# Editeur de Props
+
+Container dans Props (container est maintenant un attribut / type de container change la loot table actif)
 
 
 
 # Editeur de loots tables
 
-* Selon le containeurs choisir le % de chances qu'un loot apparaissent
-
 Editeur de loots
 
 * Permet d'ajouter/supprimer des loots du jeu
-* Taille du loot (dans l'inventaire)
-* Effets du loots (pour le moment vie ou argent)
+
+Impossible de changer le nom d'un item et ces attributs
+
+Impossible de changer la texture d'un item
+
+Save dans la loot editor ne ramène pas à l'éditeur de niveau
+
+
+

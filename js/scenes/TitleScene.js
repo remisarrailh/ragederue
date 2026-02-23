@@ -113,7 +113,7 @@ export default class TitleScene extends Phaser.Scene {
       this.bgMusic.destroy();
       this.bgMusic = null;
     }
-    this.scene.start('GameScene');
+    this.scene.start('CharacterScene');
   }
 
   _openSettings() {

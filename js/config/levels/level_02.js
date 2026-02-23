@@ -1,7 +1,7 @@
-/** level_02.js — Leve */
+/** level_02.js — Bar */
 export default {
   id: 'level_02',
-  name: 'Leve',
+  name: 'Bar',
   worldW: 3005,
   parallax: { bg: 0.06, mid: 0.25 },
   background: 'bar_backgrounds',

@@ -21,6 +21,7 @@ const ROOT        = path.join(__dirname, '..');
 const LEVELS_DIR  = path.join(ROOT, 'js', 'config', 'levels');
 const LEVELS_MAIN = path.join(ROOT, 'js', 'config', 'levels.js');
 const ASSETS_ROOT = path.join(ROOT, 'assets', 'Stage Layers');
+const LOOT_PATH   = path.join(ROOT, 'js', 'config', 'lootTable.js');
 
 // ── Lecture ────────────────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ function generateOneLevelJs(level) {
   if (level.spawnX != null) lines.push(`  spawnX: ${level.spawnX},`);
   lines.push('  props: [');
   for (const p of (level.props ?? [])) {
-    const blockStr = p.blocksPlayer ? ', blocksPlayer: true' : '';
+    const blockStr = (p.blocksPlayer ? ', blocksPlayer: true' : '') + (p.blocksEnemy ? ', blocksEnemy: true' : '');
     lines.push(`    { type: '${p.type}', x: ${p.x}, y: ${p.y}, scale: ${p.scale ?? 1}${blockStr} },`);
   }
   lines.push('  ],');
@@ -155,6 +156,114 @@ function saveLevels(rawLevels) {
   console.log(`[EditorServer] Saved ${levels.length} level(s): ${ids.join(', ')}`);
 }
 
+// ── Loot table ────────────────────────────────────────────────────────────
+
+function readLootTable() {
+  const src = fs.readFileSync(LOOT_PATH, 'utf8');
+  // Strip ES module syntax so vm.runInNewContext can execute the code
+  const cleaned = src
+    .replace(/^export\s+const\s+/gm, 'var ')
+    .replace(/^export\s+function\s+/gm, 'function ');
+  const ctx = {};
+  vm.runInNewContext(cleaned, ctx);
+  return {
+    items:              ctx.ITEM_DEFS              ?? {},
+    containerTable:     ctx.CONTAINER_LOOT_TABLE   ?? [],
+    corpseTable:        ctx.CORPSE_LOOT_TABLE       ?? [],
+    containerItemCount: ctx.CONTAINER_ITEM_COUNT   ?? { min: 1, max: 3 },
+    corpseItemCount:    ctx.CORPSE_ITEM_COUNT       ?? { min: 0, max: 2 },
+  };
+}
+
+function generateLootTableJs(data) {
+  const { items, containerTable, corpseTable, containerItemCount, corpseItemCount } = data;
+  const lines = [];
+  const L = (s = '') => lines.push(s);
+
+  L('// ── Item definitions for the extraction-shooter inventory system ───────────');
+  L('// Each item has:');
+  L('//   texture        – key for the preloaded sprite');
+  L('//   invW, invH     – grid size in inventory (1×1, 1×2, 2×1, 2×2 …)');
+  L('//   useTime        – ms to consume the item (0 = instant / not consumable)');
+  L('//   healAmount     – hp restored on use (0 = none)');
+  L('//   hungerRestore  – hunger points restored on use (0 = none)');
+  L('//   thirstRestore  – thirst points restored on use (0 = none)');
+  L('//   value          – extraction value (ETH payout)');
+  L('//   displayW/H     – world sprite display size');
+  L('//   glowColor      – colour for world glow / UI accent');
+  L('//   description    – short tooltip');
+  L();
+  L('export const ITEM_DEFS = {');
+  for (const [key, it] of Object.entries(items)) {
+    L(`  ${key}: {`);
+    L(`    texture:     '${it.texture}',`);
+    L(`    invW: ${it.invW ?? 1}, invH: ${it.invH ?? 1},`);
+    L(`    useTime:     ${it.useTime ?? 0},`);
+    L(`    healAmount:  ${it.healAmount ?? 0},`);
+    if (it.hungerRestore) L(`    hungerRestore:  ${it.hungerRestore},`);
+    if (it.thirstRestore) L(`    thirstRestore:  ${it.thirstRestore},`);
+    L(`    value:       ${it.value ?? 0},`);
+    L(`    displayW: ${it.displayW ?? 32}, displayH: ${it.displayH ?? 32},`);
+    const hex = '0x' + ((it.glowColor ?? 0xffffff) >>> 0).toString(16).padStart(6, '0');
+    L(`    glowColor:   ${hex},`);
+    const desc = (it.description ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    L(`    description: '${desc}',`);
+    L(`  },`);
+  }
+  L('};');
+  L();
+  L('// ── Loot tables for containers and enemy corpses ──────────────────────────');
+  L('// Each entry: { type, weight }  — weight is relative probability');
+  L('export const CONTAINER_LOOT_TABLE = [');
+  for (const e of (containerTable ?? []))
+    L(`  { type: '${e.type}', weight: ${e.weight} },`);
+  L('];');
+  L();
+  L('export const CORPSE_LOOT_TABLE = [');
+  for (const e of (corpseTable ?? []))
+    L(`  { type: '${e.type}', weight: ${e.weight} },`);
+  L('];');
+  L();
+  L('// How many items a container / corpse can hold (random between min–max)');
+  const cic  = containerItemCount ?? { min: 1, max: 3 };
+  const coic = corpseItemCount    ?? { min: 0, max: 2 };
+  L(`export const CONTAINER_ITEM_COUNT = { min: ${cic.min},  max: ${cic.max} };`);
+  L(`export const CORPSE_ITEM_COUNT   = { min: ${coic.min}, max: ${coic.max} };`);
+  L();
+  L('// ── Search timing ─────────────────────────────────────────────────────────');
+  L('export const SEARCH_OPEN_MS       = 800;   // time to open a container/body');
+  L('export const SEARCH_IDENTIFY_MS   = 600;   // time to identify each item inside');
+  L();
+  L('// ── Run parameters ────────────────────────────────────────────────────────');
+  L('export const RUN_TIMER = 6400;   // seconds');
+  L('// Note: EXTRACT_X and CONTAINER_SPAWNS are now defined per-level in js/config/levels.js');
+  L();
+  L('/**');
+  L(' * Roll items from a loot table.');
+  L(' * @param {Array<{type:string,weight:number}>} table');
+  L(' * @param {number} count  How many items to generate');
+  L(' * @returns {string[]}    Array of item type keys');
+  L(' */');
+  L('export function rollLoot(table, count) {');
+  L('  const totalWeight = table.reduce((s, e) => s + e.weight, 0);');
+  L('  const results = [];');
+  L('  for (let i = 0; i < count; i++) {');
+  L('    let r = Math.random() * totalWeight;');
+  L('    for (const entry of table) {');
+  L('      r -= entry.weight;');
+  L("      if (r <= 0) { results.push(entry.type); break; }");
+  L('    }');
+  L('  }');
+  L('  return results;');
+  L('}');
+  return lines.join('\n') + '\n';
+}
+
+function saveLootTable(data) {
+  fs.writeFileSync(LOOT_PATH, generateLootTableJs(data), 'utf8');
+  console.log('[EditorServer] lootTable.js saved.');
+}
+
 // ── Liste des assets ─────────────────────────────────────────────────────
 
 function listAssets() {
@@ -219,6 +328,33 @@ const server = http.createServer((req, res) => {
         json(res, 200, { ok: true, count: levels.length });
       } catch (e) {
         console.error('[EditorServer] saveLevels error:', e.message);
+        json(res, 400, { error: e.message });
+      }
+    });
+    return;
+  }
+
+  // ── GET /loot ────────────────────────────────────────────────────────
+  if (req.method === 'GET' && pathname === '/loot') {
+    try {
+      json(res, 200, readLootTable());
+    } catch (e) {
+      console.error('[EditorServer] readLootTable error:', e.message);
+      json(res, 500, { error: e.message });
+    }
+    return;
+  }
+
+  // ── POST /loot ───────────────────────────────────────────────────────
+  if (req.method === 'POST' && pathname === '/loot') {
+    let body = '';
+    req.on('data', c => { body += c; });
+    req.on('end', () => {
+      try {
+        saveLootTable(JSON.parse(body));
+        json(res, 200, { ok: true });
+      } catch (e) {
+        console.error('[EditorServer] saveLootTable error:', e.message);
         json(res, 400, { error: e.message });
       }
     });

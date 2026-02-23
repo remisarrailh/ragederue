@@ -1,20 +1,20 @@
-/** level_01.js — Street 01 */
+/** level_01.js — Street Shops */
 export default {
   id: 'level_01',
-  name: 'Street 01',
+  name: 'Street Shops',
   worldW: 10170,
   parallax: { bg: 0.065, mid: 0.5 },
   background: 'street_background',
   laneTop: 100,
   props: [
-    { type: 'car', x: 632, y: 422, scale: 1.1388888888888888 },
-    { type: 'car', x: 2200, y: 345, scale: 1.1388888888888888 },
+    { type: 'car', x: 632, y: 422, scale: 1.1944444444444444 },
+    { type: 'car', x: 2200, y: 345, scale: 1.1944444444444444 },
     { type: 'barrel', x: 800, y: 420, scale: 1 },
     { type: 'barrel', x: 1800, y: 410, scale: 0.9 },
     { type: 'hydrant', x: 1100, y: 335, scale: 0.65 },
     { type: 'hydrant', x: 2600, y: 340, scale: 0.65 },
-    { type: 'car', x: 305, y: 340, scale: 1.1388888888888888, blocksPlayer: true },
-    { type: 'car', x: 493, y: 358, scale: 1.1388888888888888 },
+    { type: 'car', x: 305, y: 340, scale: 1.1944444444444444, blocksPlayer: true, blocksEnemy: true },
+    { type: 'car', x: 493, y: 358, scale: 1.1944444444444444 },
     { type: 'banner-hor1', x: 394, y: 208, scale: 1.7808219178082192 },
     { type: 'fore', x: 229, y: 230, scale: 1.2 },
   ],

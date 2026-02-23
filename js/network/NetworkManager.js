@@ -3,6 +3,10 @@ import {
   encodePlayerState,
   encodeHitEnemy,
   encodeTakeItem,
+  encodeCharListReq,
+  encodeCharSelect,
+  encodeCharDelete,
+  encodeChestSave,
   getMsgType,
   decodeWelcome,
   decodeRoomSnapshot,
@@ -11,6 +15,9 @@ import {
   decodeEnemySnapshot,
   decodeLootData,
   decodeTimerMsg,
+  decodeCharList,
+  decodeJoinRefused,
+  decodeChestData,
   S_WELCOME,
   S_ROOM_SNAPSHOT,
   S_PLAYER_JOIN,
@@ -19,7 +26,11 @@ import {
   S_LOOT_DATA,
   S_WORLD_RESET,
   S_TIMER_SYNC,
+  S_CHAR_LIST,
+  S_JOIN_REFUSED,
+  S_CHEST_DATA,
 } from './NetProtocol.js';
+
 
 /**
  * NetworkManager — manages the WebSocket connection to the game server.
@@ -52,6 +63,9 @@ export default class NetworkManager {
     this.onWorldReset    = null;  // (remainingTime) => {}
     this.onTimerSync     = null;  // (remainingTime) => {}
     this.onDisconnect    = null;  // () => {}
+    this.onCharList      = null;  // (characters[]) => {}
+    this.onJoinRefused   = null;  // (reason: string) => {}
+    this.onChestData     = null;  // (items: string[]) => {}
 
     // ── Rate limiter ──────────────────────────────────────────────────────
     this._sendInterval = 50;  // ms (20 Hz)
@@ -75,6 +89,32 @@ export default class NetworkManager {
     const url = `${protocol}://${server}:${port}`;
     this.connect(url, name, room);
     return true;
+  }
+
+  /**
+   * Connect to WebSocket server without sending C_JOIN.
+   * Used by CharacterScene to browse characters before entering a room.
+   */
+  connectRaw(url) {
+    console.log(`[Net] Connecting (raw) to ${url}...`);
+    this.ws = new WebSocket(url);
+    this.ws.binaryType = 'arraybuffer';
+
+    this.ws.onopen = () => {
+      console.log('[Net] Connected (raw)');
+      this.connected = true;
+      if (this.onConnect) this.onConnect();
+    };
+
+    this.ws.onmessage = (event) => { this._handleMessage(event.data); };
+
+    this.ws.onclose = () => {
+      console.log('[Net] Disconnected');
+      this.connected = false;
+      if (this.onDisconnect) this.onDisconnect();
+    };
+
+    this.ws.onerror = (err) => { console.warn('[Net] WebSocket error', err); };
   }
 
   /**
@@ -138,6 +178,18 @@ export default class NetworkManager {
     this.ws.send(encodeTakeItem(targetKind, targetId, itemIdx));
   }
 
+  /** Request full character list from server. */
+  sendCharListReq() { this._send(encodeCharListReq()); }
+
+  /** Select (action=0) or create (action=1) a character. */
+  sendCharSelect(action, value) { this._send(encodeCharSelect(action, value)); }
+
+  /** Delete a character by id. */
+  sendCharDelete(charId) { this._send(encodeCharDelete(charId)); }
+
+  /** Save chest contents to server (charId included in message for raw connections). */
+  sendChestSave(charId, items) { this._send(encodeChestSave(charId, items)); }
+
   /**
    * Disconnect cleanly.
    */
@@ -150,6 +202,10 @@ export default class NetworkManager {
   }
 
   // ── Private ─────────────────────────────────────────────────────────────
+
+  _send(data) {
+    if (this.connected && this.ws) this.ws.send(data);
+  }
 
   _handleMessage(data) {
     const type = getMsgType(data);
@@ -198,6 +254,22 @@ export default class NetworkManager {
       case S_TIMER_SYNC: {
         const { remainingTime } = decodeTimerMsg(data);
         if (this.onTimerSync) this.onTimerSync(remainingTime);
+        break;
+      }
+      case S_CHAR_LIST: {
+        const chars = decodeCharList(data);
+        if (this.onCharList) this.onCharList(chars);
+        break;
+      }
+      case S_JOIN_REFUSED: {
+        const reason = decodeJoinRefused(data);
+        console.warn(`[Net] Join refused: ${reason}`);
+        if (this.onJoinRefused) this.onJoinRefused(reason);
+        break;
+      }
+      case S_CHEST_DATA: {
+        const items = decodeChestData(data);
+        if (this.onChestData) this.onChestData(items);
         break;
       }
       default:

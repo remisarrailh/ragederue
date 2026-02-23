@@ -81,6 +81,9 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       jump:  scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
     };
 
+    // ── Mobile touch input (fed by MobileControlsScene) ───────────────────
+    this.mobileJoy = { x: 0, y: 0 };
+
     // ── Gamepad attack flags (set by 'down' event, consumed each frame) ────
     this._gpAttack = { punch: false, kick: false, jab: false, jump: false };
     scene.input.gamepad.on('down', (pad, button) => {
@@ -327,11 +330,21 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     const dt    = this.scene.game.loop.delta;
     const dtSec = dt / 1000;
 
-    // Stamina — regen différée après action
+    // Stamina — regen différée après action (identique en planque)
     if (this._staminaRegenTimer > 0) {
       this._staminaRegenTimer = Math.max(0, this._staminaRegenTimer - dt);
     } else {
       this.stamina = Math.min(this.maxStamina, this.stamina + STAMINA_REGEN_RATE * dtSec);
+    }
+
+    // ── Mode Planque : regen HP / faim / soif automatique ────────────────
+    if (this.scene._levelConfig?.isPlanque) {
+      this.hp     = Math.min(this.maxHp,     this.hp     + 5  * dtSec);
+      this.hunger = Math.min(this.maxHunger, this.hunger + 10 * dtSec);
+      this.thirst = Math.min(this.maxThirst, this.thirst + 15 * dtSec);
+      this._hungerDmgAccum = 0;
+      this._thirstDmgAccum = 0;
+      return;
     }
 
     // Faim — drain passif, dégât si vide
@@ -381,6 +394,12 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
         if (pad.up.isDown)    gpY = -1;
         if (pad.down.isDown)  gpY =  1;
       }
+    }
+
+    // ── Mobile joystick (overrides gamepad if active) ────────────────────
+    if (this.mobileJoy.x !== 0 || this.mobileJoy.y !== 0) {
+      gpX = this.mobileJoy.x;
+      gpY = this.mobileJoy.y;
     }
 
     let vx = gpX * PLAYER_SPEED;

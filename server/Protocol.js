@@ -10,6 +10,10 @@ const C_ATTACK        = 0x03;
 const C_CHANGE_MAP    = 0x05;
 const C_HIT_ENEMY     = 0x07;
 const C_TAKE_ITEM     = 0x08;
+const C_CHAR_LIST     = 0x10;  // C→S : demande liste des personnages
+const C_CHAR_SELECT   = 0x11;  // C→S : sélectionne (action=0) ou crée (action=1) un personnage
+const C_CHAR_DELETE   = 0x12;  // C→S : supprime un personnage
+const C_CHEST_SAVE    = 0x13;  // C→S : sauvegarde le contenu du coffre
 
 const S_WELCOME       = 0x80;
 const S_ROOM_SNAPSHOT = 0x81;
@@ -20,6 +24,9 @@ const S_ENEMY_SNAPSHOT = 0x85;
 const S_LOOT_DATA      = 0x86;
 const S_WORLD_RESET    = 0x87;
 const S_TIMER_SYNC     = 0x88;
+const S_CHAR_LIST      = 0x90;  // S→C : liste des personnages
+const S_JOIN_REFUSED   = 0x91;  // S→C : personnage déjà en jeu
+const S_CHEST_DATA     = 0x92;  // S→C : contenu du coffre du personnage sélectionné
 
 // ─── Item types (shared with client) ────────────────────────────────────────
 const ITEM_TYPES = ['ethereum', 'sushi', 'pizza', 'ice_cream'];
@@ -194,14 +201,110 @@ function encodeTimerSync(remainingTime) {
   return buf;
 }
 
+// ─── Character messages ──────────────────────────────────────────────────────
+
+/**
+ * C_CHAR_SELECT: type(1) + action(u8: 0=select, 1=create) + len(u8) + value(N)
+ */
+function decodeCharSelect(buf) {
+  const action = buf[1];
+  const len    = buf[2];
+  const value  = buf.slice(3, 3 + len).toString('utf8');
+  return { action, value };
+}
+
+/**
+ * C_CHAR_DELETE: type(1) + len(u8) + charId(N)
+ */
+function decodeCharDelete(buf) {
+  const len = buf[1];
+  return { charId: buf.slice(2, 2 + len).toString('utf8') };
+}
+
+/**
+ * S_CHAR_LIST: type(1) + count(u8) + [ idLen(u8)+id + nameLen(u8)+name ]*count
+ */
+function encodeCharList(characters) {
+  const parts = characters.map(c => ({
+    idB:   Buffer.from(c.id,   'utf8'),
+    nameB: Buffer.from(c.name, 'utf8'),
+  }));
+  const size = 2 + parts.reduce((s, p) => s + 2 + p.idB.length + p.nameB.length, 0);
+  const buf  = Buffer.alloc(size);
+  buf[0] = S_CHAR_LIST;
+  buf[1] = characters.length;
+  let off = 2;
+  for (const p of parts) {
+    buf[off++] = p.idB.length;
+    p.idB.copy(buf, off); off += p.idB.length;
+    buf[off++] = p.nameB.length;
+    p.nameB.copy(buf, off); off += p.nameB.length;
+  }
+  return buf;
+}
+
+/**
+ * S_JOIN_REFUSED: type(1) + reasonLen(u8) + reason(N)
+ */
+function encodeJoinRefused(reason) {
+  const rb  = Buffer.from(reason, 'utf8');
+  const buf = Buffer.alloc(2 + rb.length);
+  buf[0] = S_JOIN_REFUSED;
+  buf[1] = rb.length;
+  rb.copy(buf, 2);
+  return buf;
+}
+
+/**
+ * C_CHEST_SAVE: type(1) + charIdLen(u8) + charId(N) + count(u8) + [itemLen(u8) + item(N)]*count
+ * Sent by client to persist chest contents on the server.
+ * charId is included so the server can identify the character even on a raw connection.
+ */
+function decodeChestSave(buf) {
+  let off = 1;
+  const charIdLen = buf[off++];
+  const charId    = buf.slice(off, off + charIdLen).toString('utf8');
+  off += charIdLen;
+  const count = buf[off++];
+  const items = [];
+  for (let i = 0; i < count; i++) {
+    const len  = buf[off++];
+    items.push(buf.slice(off, off + len).toString('utf8'));
+    off += len;
+  }
+  return { charId, items };
+}
+
+/**
+ * S_CHEST_DATA: type(1) + count(u8) + [itemLen(u8) + item(N)]*count
+ * Sent by server after character selection to restore chest contents.
+ */
+function encodeChestData(items) {
+  const parts = items.map(s => Buffer.from(s, 'utf8'));
+  const size  = 2 + parts.reduce((s, b) => s + 1 + b.length, 0);
+  const buf   = Buffer.alloc(size);
+  buf[0] = S_CHEST_DATA;
+  buf[1] = items.length;
+  let off = 2;
+  for (const b of parts) {
+    buf[off++] = b.length;
+    b.copy(buf, off); off += b.length;
+  }
+  return buf;
+}
+
 // ─── Exports ────────────────────────────────────────────────────────────────
 module.exports = {
   C_JOIN, C_PLAYER_STATE, C_ATTACK, C_CHANGE_MAP, C_HIT_ENEMY, C_TAKE_ITEM,
+  C_CHAR_LIST, C_CHAR_SELECT, C_CHAR_DELETE, C_CHEST_SAVE,
   S_WELCOME, S_ROOM_SNAPSHOT, S_PLAYER_JOIN, S_PLAYER_LEAVE, S_DAMAGE,
   S_ENEMY_SNAPSHOT, S_LOOT_DATA, S_WORLD_RESET, S_TIMER_SYNC,
+  S_CHAR_LIST, S_JOIN_REFUSED, S_CHEST_DATA,
   STATES, stateToIdx, ENEMY_STATES, enemyStateToIdx,
   ITEM_TYPES, itemTypeToIdx,
   decodeJoin, decodePlayerState, decodeHitEnemy, decodeTakeItem,
+  decodeCharSelect, decodeCharDelete, decodeChestSave,
   encodeWelcome, encodeRoomSnapshot, encodePlayerJoin, encodePlayerLeave,
   encodeEnemySnapshot, encodeLootData, encodeWorldReset, encodeTimerSync,
+  encodeCharList, encodeJoinRefused, encodeChestData,
 };

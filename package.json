@@ -2,19 +2,23 @@
   "name": "RAGEDERUEonline",
   "version": "0.1.0",
   "description": "Beat-em-up / extraction game",
+  "homepage": "https://remisarrailh.github.io/ragederue",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "server": "node server/index.js",
     "editor": "node server/editor-server.js",
-    "start": "concurrently \"npm run server\" \"npm run editor\" \"npm run dev\""
+    "start": "concurrently \"npm run server\" \"npm run editor\" \"npm run dev\"",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "ws": "^8.19.0"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "gh-pages": "^5.0.0"
   }
 }

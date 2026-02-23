@@ -16,6 +16,10 @@ export const C_ATTACK        = 0x03;
 export const C_CHANGE_MAP    = 0x05;
 export const C_HIT_ENEMY     = 0x07;
 export const C_TAKE_ITEM     = 0x08;
+export const C_CHAR_LIST     = 0x10;  // Request character list
+export const C_CHAR_SELECT   = 0x11;  // Select (action=0) or create (action=1) a character
+export const C_CHAR_DELETE   = 0x12;  // Delete a character
+export const C_CHEST_SAVE    = 0x13;  // Save chest contents to server
 
 // Server → Client
 export const S_WELCOME       = 0x80;
@@ -27,6 +31,9 @@ export const S_ENEMY_SNAPSHOT = 0x85;
 export const S_LOOT_DATA      = 0x86;
 export const S_WORLD_RESET    = 0x87;
 export const S_TIMER_SYNC     = 0x88;
+export const S_CHAR_LIST      = 0x90;  // Character list response
+export const S_JOIN_REFUSED   = 0x91;  // Character already in-game
+export const S_CHEST_DATA     = 0x92;  // Chest contents after character selection
 
 // ─── Item types (shared with server) ────────────────────────────────────────
 export const ITEM_TYPES = ['ethereum', 'sushi', 'pizza', 'ice_cream'];
@@ -285,4 +292,90 @@ export function decodeEnemySnapshot(buf) {
     enemies.push({ netId, x, y, hp, state: ENEMY_STATES[stateIdx] || 'patrol', facing });
   }
   return { enemies };
+}
+
+// ─── Character messages (client-side encode) ─────────────────────────────────
+
+/** C_CHAR_LIST: type(1) — request character list */
+export function encodeCharListReq() {
+  return new Uint8Array([C_CHAR_LIST]);
+}
+
+/** C_CHAR_SELECT: type(1) + action(u8) + len(u8) + value(N) */
+export function encodeCharSelect(action, value) {
+  const bytes = new TextEncoder().encode(value);
+  const buf = new Uint8Array(3 + bytes.length);
+  buf[0] = C_CHAR_SELECT;
+  buf[1] = action;
+  buf[2] = bytes.length;
+  buf.set(bytes, 3);
+  return buf;
+}
+
+/** C_CHAR_DELETE: type(1) + len(u8) + charId(N) */
+export function encodeCharDelete(charId) {
+  const bytes = new TextEncoder().encode(charId);
+  const buf = new Uint8Array(2 + bytes.length);
+  buf[0] = C_CHAR_DELETE;
+  buf[1] = bytes.length;
+  buf.set(bytes, 2);
+  return buf;
+}
+
+/** S_CHAR_LIST: type(1) + count(u8) + [ idLen+id + nameLen+name ]* */
+export function decodeCharList(buf) {
+  const u8    = new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
+  const count = u8[1];
+  const chars = [];
+  const dec   = new TextDecoder();
+  let off = 2;
+  for (let i = 0; i < count; i++) {
+    const idLen = u8[off++];
+    const id    = dec.decode(u8.slice(off, off + idLen)); off += idLen;
+    const nameLen = u8[off++];
+    const name  = dec.decode(u8.slice(off, off + nameLen)); off += nameLen;
+    chars.push({ id, name });
+  }
+  return chars;
+}
+
+/** S_JOIN_REFUSED: type(1) + reasonLen(u8) + reason(N) */
+export function decodeJoinRefused(buf) {
+  const u8  = new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
+  const len = u8[1];
+  return new TextDecoder().decode(u8.slice(2, 2 + len));
+}
+
+/** C_CHEST_SAVE: type(1) + charIdLen(u8) + charId(N) + count(u8) + [itemLen(u8) + item(N)]* */
+export function encodeChestSave(charId, items) {
+  const enc     = new TextEncoder();
+  const charIdB = enc.encode(charId);
+  const parts   = items.map(s => enc.encode(s));
+  const size    = 1 + 1 + charIdB.length + 1 + parts.reduce((s, b) => s + 1 + b.length, 0);
+  const buf     = new Uint8Array(size);
+  let off = 0;
+  buf[off++] = C_CHEST_SAVE;
+  buf[off++] = charIdB.length;
+  buf.set(charIdB, off); off += charIdB.length;
+  buf[off++] = items.length;
+  for (const b of parts) {
+    buf[off++] = b.length;
+    buf.set(b, off); off += b.length;
+  }
+  return buf;
+}
+
+/** S_CHEST_DATA: type(1) + count(u8) + [itemLen(u8) + item(N)]* */
+export function decodeChestData(buf) {
+  const u8    = new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
+  const count = u8[1];
+  const dec   = new TextDecoder();
+  const items = [];
+  let off = 2;
+  for (let i = 0; i < count; i++) {
+    const len = u8[off++];
+    items.push(dec.decode(u8.slice(off, off + len)));
+    off += len;
+  }
+  return items;
 }

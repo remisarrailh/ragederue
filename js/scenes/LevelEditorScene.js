@@ -70,6 +70,10 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._inputBuffer    = '';
     this._inputTarget    = null;
     this._exportOverlay       = null;
+    this._lootOverlay         = null;   // persistent overlay objects []
+    this._lootContentObjs     = [];    // rebuilt on tab switch
+    this._lootData            = null;  // { items, containerTable, corpseTable, … }
+    this._lootTab             = 'tables';
     this._selRect             = null;
     this._availableBackgrounds = [null, ...BACKGROUND_KEYS]; // null = aucun fond
     this._dragActive     = false;
@@ -95,8 +99,9 @@ export default class LevelEditorScene extends Phaser.Scene {
     this.cameras.main.ignore(this._uiLayer);
     this._uiCam.ignore(this._worldLayer);
 
-    // Tente de charger les niveaux depuis le serveur éditeur (async)
+    // Tente de charger les niveaux et la loot table depuis le serveur éditeur (async)
     this._fetchLevelsFromServer();
+    this._fetchLootData();
 
     // ── Clavier ──────────────────────────────────────────────────────────
     this._keys = this.input.keyboard.addKeys({
@@ -214,6 +219,21 @@ export default class LevelEditorScene extends Phaser.Scene {
       y += 22;
     }
     this._updatePaletteHighlight();
+
+    // Bouton spécial loot editor (en bas de palette)
+    y += 8;
+    const sepLoot = this.add.text(4, y, '──────────', {
+      fontFamily: 'monospace', fontSize: '10px', color: '#333355',
+    }).setDepth(700);
+    this._uiLayer.add(sepLoot);
+    y += 14;
+    const lootBtn = this.add.text(4, y, '[LOOT ED.]', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#ff88cc',
+    }).setDepth(700).setInteractive({ useHandCursor: true });
+    this._uiLayer.add(lootBtn);
+    lootBtn.on('pointerdown', () => this._showLootEditor());
+    lootBtn.on('pointerover', () => lootBtn.setColor('#ffffff'));
+    lootBtn.on('pointerout',  () => lootBtn.setColor('#ff88cc'));
   }
 
   _buildPropsPanel() {
@@ -1043,6 +1063,8 @@ export default class LevelEditorScene extends Phaser.Scene {
 
   _commitInput() {
     if (!this._capturingInput) return;
+    // Déléguer au sous-système loot si nécessaire
+    if (this._inputTarget?.source === 'loot') { this._commitLootInput(); return; }
     const { obj, field, textObj } = this._inputTarget;
     const level = this._levels[this._currentIdx];
 
@@ -1097,6 +1119,13 @@ export default class LevelEditorScene extends Phaser.Scene {
 
   _cancelInput() {
     if (!this._capturingInput) return;
+    if (this._inputTarget?.source === 'loot') {
+      this._inputTarget.textObj.setColor(this._inputTarget.cancelColor ?? '#ffcc44');
+      this._capturingInput = false;
+      this._inputTarget    = null;
+      this._lootRedrawContent();
+      return;
+    }
     const { field, textObj } = this._inputTarget;
     if (field === '__levelProp')  textObj.setColor('#aaaacc');
     else if (field === 'name')    { textObj.setColor('#ffffff'); this._updateToolbarName(); }
@@ -1119,9 +1148,9 @@ export default class LevelEditorScene extends Phaser.Scene {
         this._inputTarget.textObj.setText(this._inputBuffer + '_');
         return;
       }
-      const isText = this._inputTarget.field === 'label';
+      const isText = this._inputTarget.field === 'label' || this._inputTarget.field === 'name';
       const valid  = isText
-        ? (/^[\w ]$/.test(e.key) && this._inputBuffer.length < 20)
+        ? (/^[\w \-]$/.test(e.key) && this._inputBuffer.length < 30)
         : (/^[\d.\-]$/.test(e.key) && this._inputBuffer.length < 10);
       if (valid) {
         this._inputBuffer += e.key;
@@ -1390,5 +1419,301 @@ export default class LevelEditorScene extends Phaser.Scene {
       targets: txt, alpha: 0, duration: 900, delay: 1000,
       onComplete: () => txt.destroy(),
     });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  LOOT EDITOR OVERLAY
+  // ══════════════════════════════════════════════════════════════════════
+
+  async _fetchLootData() {
+    try {
+      const res = await fetch(`${EDITOR_URL}/loot`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      this._lootData = await res.json();
+    } catch (e) {
+      console.info('[Editor] Loot data non disponible :', e.message);
+    }
+  }
+
+  _showLootEditor() {
+    if (this._lootOverlay) return;
+    if (!this._lootData) {
+      this._showSaveFeedback(false);
+      return;
+    }
+    this._lootTab = 'tables';
+    const D   = 8000;
+    const all = [];   // tous les objets persistants de l'overlay
+    const ui  = (go) => { this._uiLayer.add(go); all.push(go); return go; };
+
+    // Fond bloquant les clics vers le level editor
+    ui(this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x060614, 0.97)
+      .setDepth(D).setInteractive());
+
+    // Barre de titre
+    ui(this.add.rectangle(GAME_W / 2, 16, GAME_W, 32, 0x111133).setDepth(D + 1));
+    ui(this.add.text(8, 4, '◆ LOOT EDITOR', {
+      fontFamily: 'monospace', fontSize: '12px', color: '#ff88cc',
+    }).setDepth(D + 2));
+
+    // Helper bouton header
+    const hBtn = (x, label, color, cb) => {
+      const b = ui(this.add.text(x, 16, label, {
+        fontFamily: 'monospace', fontSize: '11px', color,
+      }).setOrigin(0.5, 0.5).setDepth(D + 2).setInteractive({ useHandCursor: true }));
+      b._col = color;
+      b.on('pointerdown', cb);
+      b.on('pointerover', () => b.setColor('#ffffff'));
+      b.on('pointerout',  () => b.setColor(b._col));
+      return b;
+    };
+
+    this._lootBtnTables = hBtn(200, '[TABLES]', '#aaaacc', () => this._lootSetTab('tables'));
+    this._lootBtnItems  = hBtn(280, '[ITEMS]',  '#aaaacc', () => this._lootSetTab('items'));
+    hBtn(GAME_W - 130, '[SAVE]',  '#ffcc00', () => this._saveLootToServer());
+    hBtn(GAME_W -  50, '[CLOSE]', '#ff4444', () => this._hideLootEditor());
+
+    this._lootOverlay     = all;
+    this._lootContentObjs = [];
+    this._lootRedrawContent();
+  }
+
+  _hideLootEditor() {
+    if (!this._lootOverlay) return;
+    for (const go of this._lootOverlay)     go.destroy();
+    for (const go of this._lootContentObjs) go.destroy();
+    this._lootOverlay     = null;
+    this._lootContentObjs = [];
+    if (this._inputTarget?.source === 'loot') {
+      this._capturingInput = false;
+      this._inputTarget    = null;
+    }
+  }
+
+  _lootSetTab(tab) {
+    this._lootTab = tab;
+    this._lootRedrawContent();
+  }
+
+  _lootRedrawContent() {
+    for (const go of this._lootContentObjs) go.destroy();
+    this._lootContentObjs = [];
+    if (this._lootTab === 'tables') this._lootBuildTables();
+    else                            this._lootBuildItems();
+    // Highlighter les onglets actifs
+    this._lootBtnTables?.setColor(this._lootTab === 'tables' ? '#ff88cc' : '#aaaacc');
+    this._lootBtnItems ?.setColor(this._lootTab === 'items'  ? '#ff88cc' : '#aaaacc');
+  }
+
+  _lootBuildTables() {
+    const D    = 8003;
+    const Y0   = 36;
+    const RH   = 18;   // row height
+    const BMAX = 170;  // max bar width px
+    const co   = (go) => { this._uiLayer.add(go); this._lootContentObjs.push(go); return go; };
+
+    const drawTable = (title, tableArr, tableKey, xOff) => {
+      const total = tableArr.reduce((s, e) => s + e.weight, 0) || 1;
+      co(this.add.text(xOff, Y0 + 4, title, {
+        fontFamily: 'monospace', fontSize: '10px', color: '#aaaacc',
+      }).setDepth(D));
+      co(this.add.rectangle(xOff + 175, Y0 + 16, 350, 1, 0x334455).setOrigin(0, 0.5).setDepth(D));
+
+      tableArr.forEach((entry, idx) => {
+        const y      = Y0 + 22 + idx * RH;
+        const ratio  = entry.weight / total;
+        const barW   = Math.max(1, Math.round(ratio * BMAX));
+        const pct    = Math.round(ratio * 100);
+
+        // Nom
+        co(this.add.text(xOff, y, entry.type.slice(0, 13), {
+          fontFamily: 'monospace', fontSize: '10px', color: '#cccccc',
+        }).setDepth(D));
+
+        // Poids (cliquable)
+        const wtxt = co(this.add.text(xOff + 108, y, String(entry.weight).padStart(3), {
+          fontFamily: 'monospace', fontSize: '10px', color: '#ffcc44',
+        }).setDepth(D).setInteractive({ useHandCursor: true }));
+        wtxt.on('pointerover', () => wtxt.setColor('#ffffff'));
+        wtxt.on('pointerout',  () => {
+          if (!(this._inputTarget?.source === 'loot' && this._inputTarget.idx === idx
+             && this._inputTarget.table === tableKey)) wtxt.setColor('#ffcc44');
+        });
+        wtxt.on('pointerdown', () => {
+          if (this._capturingInput) return;
+          this._capturingInput = true;
+          this._inputBuffer    = String(entry.weight);
+          this._inputTarget    = { source: 'loot', type: 'weight', table: tableKey, idx, textObj: wtxt, cancelColor: '#ffcc44' };
+          wtxt.setColor('#ffff00').setText(this._inputBuffer + '_');
+        });
+
+        // Pourcentage
+        co(this.add.text(xOff + 132, y, `${pct}%`.padStart(4), {
+          fontFamily: 'monospace', fontSize: '9px', color: '#556677',
+        }).setDepth(D));
+
+        // Barre fond + remplissage
+        co(this.add.rectangle(xOff + 165, y + 4, BMAX, 8, 0x1a1a33).setOrigin(0, 0.5).setDepth(D));
+        co(this.add.rectangle(xOff + 165, y + 4, barW, 8, 0x4466cc).setOrigin(0, 0.5).setDepth(D + 1));
+      });
+
+      // Séparateur + total
+      const botY = Y0 + 22 + tableArr.length * RH;
+      co(this.add.rectangle(xOff + 175, botY, 350, 1, 0x334455).setOrigin(0, 0.5).setDepth(D));
+      co(this.add.text(xOff, botY + 4, `Total : ${total}`, {
+        fontFamily: 'monospace', fontSize: '9px', color: '#445566',
+      }).setDepth(D));
+
+      // Count items
+      const isContainer = tableKey === 'container';
+      const count = isContainer ? this._lootData.containerItemCount : this._lootData.corpseItemCount;
+      const countY = botY + 20;
+      co(this.add.text(xOff, countY, `Drops : ${count?.min ?? 0}–${count?.max ?? 1} items`, {
+        fontFamily: 'monospace', fontSize: '9px', color: '#445566',
+      }).setDepth(D));
+
+      // Boutons +/- pour min / max
+      const editCount = (field, dx) => {
+        const obj = isContainer ? this._lootData.containerItemCount : this._lootData.corpseItemCount;
+        obj[field] = Math.max(0, (obj[field] ?? 0) + dx);
+        if (obj.min > obj.max) obj[field === 'min' ? 'max' : 'min'] = obj[field];
+        this._lootRedrawContent();
+      };
+      const mkCntBtn = (x, y, lbl, cb) => {
+        const b = co(this.add.text(x, y, lbl, {
+          fontFamily: 'monospace', fontSize: '10px', color: '#556677',
+        }).setDepth(D).setInteractive({ useHandCursor: true }));
+        b.on('pointerdown', cb);
+        b.on('pointerover', () => b.setColor('#ffffff'));
+        b.on('pointerout',  () => b.setColor('#556677'));
+        return b;
+      };
+      mkCntBtn(xOff + 165, countY, '[-min]', () => editCount('min', -1));
+      mkCntBtn(xOff + 210, countY, '[+min]', () => editCount('min', +1));
+      mkCntBtn(xOff + 255, countY, '[-max]', () => editCount('max', -1));
+      mkCntBtn(xOff + 300, countY, '[+max]', () => editCount('max', +1));
+    };
+
+    // Séparateur vertical centre
+    co(this.add.rectangle(GAME_W / 2, GAME_H / 2, 1, GAME_H, 0x222244).setDepth(D));
+
+    drawTable('CONTAINER TABLE', this._lootData.containerTable, 'container', 8);
+    drawTable('CORPSE TABLE',    this._lootData.corpseTable,    'corpse',    GAME_W / 2 + 8);
+  }
+
+  _lootBuildItems() {
+    const D   = 8003;
+    const Y0  = 36;
+    const RH  = 16;
+    const co  = (go) => { this._uiLayer.add(go); this._lootContentObjs.push(go); return go; };
+
+    // Colonnes : key, texture, INV, TIME, HEAL, HUNG, THIR, VAL, [✕]
+    const COLS  = [8, 125, 220, 255, 300, 340, 380, 415, 460];
+    const HDRS  = ['KEY', 'TEXTURE', 'INV', 'TIME', 'HEAL', 'HUNG', 'THIR', 'VAL'];
+    const COLS2 = [470, 580, 670, 700, 745, 785, 825, 860, 900];
+
+    const drawHeader = (offsets) => {
+      HDRS.forEach((h, i) => co(this.add.text(offsets[i], Y0 + 4, h, {
+        fontFamily: 'monospace', fontSize: '9px', color: '#556677',
+      }).setDepth(D)));
+    };
+    drawHeader(COLS);
+    drawHeader(COLS2);
+    co(this.add.rectangle(GAME_W / 2, Y0 + 17, GAME_W - 8, 1, 0x334455).setOrigin(0.5, 0.5).setDepth(D));
+
+    const allItems = Object.entries(this._lootData.items ?? {});
+    const usedKeys = new Set([
+      ...(this._lootData.containerTable ?? []).map(e => e.type),
+      ...(this._lootData.corpseTable    ?? []).map(e => e.type),
+    ]);
+
+    // Afficher en 2 colonnes (max ~15 items par colonne)
+    const COL1 = allItems.slice(0, Math.ceil(allItems.length / 2));
+    const COL2 = allItems.slice(Math.ceil(allItems.length / 2));
+
+    const drawItemRow = (key, it, rowIdx, colOffsets) => {
+      const y      = Y0 + 22 + rowIdx * RH;
+      const isUsed = usedKeys.has(key);
+
+      const cellStyle = (col) => ({ fontFamily: 'monospace', fontSize: '9px', color: col });
+      co(this.add.text(colOffsets[0], y, key.slice(0, 12),            cellStyle('#cccccc')).setDepth(D));
+      co(this.add.text(colOffsets[1], y, (it.texture ?? '?').slice(0,10), cellStyle('#aaaacc')).setDepth(D));
+      co(this.add.text(colOffsets[2], y, `${it.invW ?? 1}×${it.invH ?? 1}`, cellStyle('#aaaaaa')).setDepth(D));
+      co(this.add.text(colOffsets[3], y, String(it.useTime     ?? 0), cellStyle('#888888')).setDepth(D));
+      co(this.add.text(colOffsets[4], y, String(it.healAmount  ?? 0), cellStyle('#ff8888')).setDepth(D));
+      co(this.add.text(colOffsets[5], y, String(it.hungerRestore ?? 0), cellStyle('#ffaa44')).setDepth(D));
+      co(this.add.text(colOffsets[6], y, String(it.thirstRestore ?? 0), cellStyle('#44aaff')).setDepth(D));
+      co(this.add.text(colOffsets[7], y, String(it.value        ?? 0), cellStyle('#00ffcc')).setDepth(D));
+
+      // Bouton supprimer
+      const delColor = isUsed ? '#443333' : '#ff4444';
+      const delBtn   = co(this.add.text(colOffsets[8], y, '[✕]', cellStyle(delColor))
+        .setDepth(D).setInteractive({ useHandCursor: true }));
+      delBtn.on('pointerover', () => delBtn.setColor(isUsed ? '#665555' : '#ffffff'));
+      delBtn.on('pointerout',  () => delBtn.setColor(delColor));
+      delBtn.on('pointerdown', () => {
+        if (isUsed) {
+          this._showSaveFeedback(false);  // toast "non disponible" = item utilisé
+          return;
+        }
+        delete this._lootData.items[key];
+        this._lootRedrawContent();
+      });
+    };
+
+    COL1.forEach(([k, it], i) => drawItemRow(k, it, i, COLS));
+    COL2.forEach(([k, it], i) => drawItemRow(k, it, i, COLS2));
+
+    // Séparateur vertical
+    co(this.add.rectangle(GAME_W / 2, GAME_H / 2, 1, GAME_H, 0x222244).setDepth(D));
+
+    // Bouton + ADD item
+    const addY = Y0 + 22 + Math.ceil(allItems.length / 2) * RH + 8;
+    const addBtn = co(this.add.text(8, addY, '[+ NOUVEL ITEM]', {
+      fontFamily: 'monospace', fontSize: '10px', color: '#44ff88',
+    }).setDepth(D).setInteractive({ useHandCursor: true }));
+    addBtn.on('pointerover', () => addBtn.setColor('#ffffff'));
+    addBtn.on('pointerout',  () => addBtn.setColor('#44ff88'));
+    addBtn.on('pointerdown', () => {
+      const newKey = `item_${Date.now()}`;
+      this._lootData.items[newKey] = {
+        texture: 'barrel', invW: 1, invH: 1, useTime: 0,
+        healAmount: 0, value: 0, displayW: 32, displayH: 32,
+        glowColor: 0xffffff, description: 'New item',
+      };
+      this._lootRedrawContent();
+    });
+  }
+
+  _commitLootInput() {
+    const { type, table, idx, textObj } = this._inputTarget;
+    if (type === 'weight') {
+      const val = parseInt(this._inputBuffer, 10);
+      if (!isNaN(val) && val >= 0) {
+        const arr = table === 'container'
+          ? this._lootData.containerTable
+          : this._lootData.corpseTable;
+        arr[idx].weight = val;
+      }
+    }
+    this._capturingInput = false;
+    this._inputTarget    = null;
+    this._lootRedrawContent();
+  }
+
+  async _saveLootToServer() {
+    if (!this._lootData) return;
+    try {
+      const res = await fetch(`${EDITOR_URL}/loot`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(this._lootData),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      this._showSaveFeedback(true);
+    } catch (e) {
+      console.error('[Editor] Loot save error:', e.message);
+      this._showSaveFeedback(false);
+    }
   }
 }

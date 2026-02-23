@@ -14,6 +14,10 @@ const { WebSocketServer } = require('ws');
 const http = require('http');
 const Room = require('./Room');
 const Protocol = require('./Protocol');
+const CharacterStore = require('./CharacterStore');
+
+// Characters currently in-game: Set of charId strings
+const activeChars = new Set();
 
 const PORT = parseInt(process.argv[2] || '9000', 10);
 
@@ -83,6 +87,7 @@ wss.on('connection', (ws) => {
     id: nextId++,
     ws,
     name: 'Unknown',
+    charId: null,   // set when C_CHAR_SELECT(0, charId) succeeds
     room: null,
     x: 150, y: 460,
     velX: 0, velY: 0,
@@ -148,6 +153,53 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      case Protocol.C_CHAR_LIST: {
+        ws.send(Protocol.encodeCharList(CharacterStore.getAll()), { binary: true });
+        break;
+      }
+
+      case Protocol.C_CHAR_SELECT: {
+        const { action, value } = Protocol.decodeCharSelect(data);
+        if (action === 1) {
+          // Create new character
+          if (value.trim().length > 0) CharacterStore.create(value);
+        } else {
+          // Select existing character
+          if (activeChars.has(value)) {
+            ws.send(Protocol.encodeJoinRefused('Personnage déjà en jeu'), { binary: true });
+            break;
+          }
+          player.charId = value;
+          activeChars.add(value);
+          console.log(`[Server] ${player.name} (id=${player.id}) selected char "${value}"`);
+          // Send chest contents to the client
+          const char = CharacterStore.getById(value);
+          if (char) ws.send(Protocol.encodeChestData(char.chestItems || []), { binary: true });
+        }
+        ws.send(Protocol.encodeCharList(CharacterStore.getAll()), { binary: true });
+        break;
+      }
+
+      case Protocol.C_CHEST_SAVE: {
+        const { charId: saveCharId, items } = Protocol.decodeChestSave(data);
+        const targetCharId = saveCharId || player.charId;
+        if (targetCharId) {
+          CharacterStore.updateChest(targetCharId, items);
+          console.log(`[Server] Chest saved for char "${targetCharId}" (${items.length} items)`);
+        }
+        break;
+      }
+
+      case Protocol.C_CHAR_DELETE: {
+        const { charId } = Protocol.decodeCharDelete(data);
+        // Cannot delete a character that is currently in-game
+        if (!activeChars.has(charId)) {
+          CharacterStore.delete(charId);
+        }
+        ws.send(Protocol.encodeCharList(CharacterStore.getAll()), { binary: true });
+        break;
+      }
+
       default:
         // Unknown message — ignore
         break;
@@ -156,6 +208,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log(`[Server] ${player.name} (id=${player.id}) disconnected`);
+    if (player.charId) activeChars.delete(player.charId);
     if (player.room) {
       player.room.removePlayer(player);
       // Notify others

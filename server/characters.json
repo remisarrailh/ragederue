@@ -1,0 +1,14 @@
+{
+  "characters": [
+    {
+      "id": "char_1771879955369",
+      "name": "remi",
+      "chestItems": [
+        "sushi",
+        "pizza",
+        "ice_cream"
+      ],
+      "createdAt": 1771879955369
+    }
+  ]
+}

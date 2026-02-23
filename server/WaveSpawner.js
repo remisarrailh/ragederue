@@ -6,10 +6,10 @@
  */
 const ServerEnemy = require('./ServerEnemy');
 
-const WAVE_INTERVAL_MS = 10_000;
+const WAVE_INTERVAL_MS = 30_000;
 const WAVE_MIN    = 1;
 const WAVE_MAX    = 3;
-const MAX_ENEMIES = 30;
+const MAX_ENEMIES = 5;
 const LANE_TOP    = 330;
 const LANE_BOTTOM = 470;
 const EXTRACT_X   = 3500;

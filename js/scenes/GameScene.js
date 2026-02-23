@@ -44,7 +44,17 @@ export default class GameScene extends Phaser.Scene {
     // ── Network ───────────────────────────────────────────────────────────
     this.net           = new NetworkManager();
     this.remotePlayers = new Map();
-    this.net.autoConnect('Player');
+    if (!this._levelConfig.isPlanque) {
+      this.net.autoConnect('Player');
+    } else {
+      // En planque, connexion raw (sans C_JOIN) pour pouvoir sauvegarder le coffre
+      const params   = new URLSearchParams(window.location.search);
+      const server   = params.get('server') || 'localhost';
+      const port     = params.get('port')   || '9000';
+      const ssl      = params.get('ssl') === 'true' || window.location.protocol === 'https:';
+      const protocol = ssl ? 'wss' : 'ws';
+      this.net.connectRaw(`${protocol}://${server}:${port}`);
+    }
 
     // ── World ─────────────────────────────────────────────────────────────
     this.world = new WorldBuilder(this);
@@ -64,7 +74,8 @@ export default class GameScene extends Phaser.Scene {
     // ── Player ────────────────────────────────────────────────────────────
     const spawnX = this._levelConfig.spawnX ?? 150;
     this.player        = new Player(this, spawnX, this.laneBottom - 10, this.combat);
-    this.player.wallet = 0;
+    // Restore wallet across level transitions (stored in registry)
+    this.player.wallet = this.registry.get('playerWallet') ?? 0;
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
     this.physics.add.collider(this.player, this.world.blockingGroup);
 
@@ -73,7 +84,9 @@ export default class GameScene extends Phaser.Scene {
     this.enemiesGroup = this.physics.add.group();
 
     // ── Inventory & loot ─────────────────────────────────────────────────
-    this.inventory  = new Inventory();
+    // Reuse the inventory across level transitions (stored in registry)
+    this.inventory = this.registry.get('playerInventory') ?? new Inventory();
+    this.registry.set('playerInventory', this.inventory);
     this.lootSystem = new LootSystem(this);
     this.lootSystem.spawnContainers(this._levelConfig.containers);
 
@@ -123,9 +136,20 @@ export default class GameScene extends Phaser.Scene {
     this.bgMusic.play();
     this.registry.set('sfxVol', parseFloat(localStorage.getItem('RAGEDERUE_sfx_vol') ?? '0.5'));
 
+    // ── Mobile controls (touch devices only) ─────────────────────────────
+    this._mobileActive = navigator.maxTouchPoints > 0;
+    if (this._mobileActive) {
+      this.scene.launch('MobileControlsScene', {
+        player:      this.player,
+        onInteract:  () => this._interact(),
+        onInventory: () => this._openInventory(),
+      });
+    }
+
     // ── Search cooldown ───────────────────────────────────────────────────
     this._searchCooldown = 0;
     this.scene.get('SearchScene').events.on('shutdown', () => { this._searchCooldown = 500; });
+    this.scene.get('HideoutChestScene').events.on('shutdown', () => { this._searchCooldown = 500; });
   }
 
   // ──────────────────────────────────────────────── update ─────────────
@@ -206,11 +230,13 @@ export default class GameScene extends Phaser.Scene {
       this._transitPrompt.setVisible(false);
     }
 
-    this.net.sendState(
-      this.player.x, this.player.y,
-      this.player.body.velocity.x, this.player.body.velocity.y,
-      this.player.state, this.player.facing, this.player.hp,
-    );
+    if (!this._levelConfig.isPlanque) {
+      this.net.sendState(
+        this.player.x, this.player.y,
+        this.player.body.velocity.x, this.player.body.velocity.y,
+        this.player.state, this.player.facing, this.player.hp,
+      );
+    }
 
     for (const [, rp] of this.remotePlayers) rp.update(time, delta);
 
@@ -299,10 +325,12 @@ export default class GameScene extends Phaser.Scene {
   _warpToLevel(targetLevelId) {
     if (this._gameEnded) return;
     this._gameEnded = true;
+    // Persist wallet so it survives the scene restart
+    this.registry.set('playerWallet', this.player.wallet ?? 0);
     this.net.disconnect();
     for (const [, rp] of this.remotePlayers) rp.destroy();
     this.remotePlayers.clear();
-    ['HUDScene','SearchScene','InventoryScene','PauseScene'].forEach(k => this.scene.stop(k));
+    ['HUDScene','SearchScene','HideoutChestScene','InventoryScene','PauseScene'].forEach(k => this.scene.stop(k));
     this.player.searching = false;
     this.player.inMenu    = false;
     if (this.bgMusic) { this.bgMusic.stop(); this.bgMusic.destroy(); this.bgMusic = null; }
@@ -317,10 +345,13 @@ export default class GameScene extends Phaser.Scene {
   _endGame(result, reason) {
     if (this._gameEnded) return;
     this._gameEnded = true;
+    // Clear persistent inventory/wallet so the next run starts fresh
+    this.registry.remove('playerInventory');
+    this.registry.remove('playerWallet');
     this.net.disconnect();
     for (const [, rp] of this.remotePlayers) rp.destroy();
     this.remotePlayers.clear();
-    ['HUDScene','SearchScene','InventoryScene','PauseScene'].forEach(k => this.scene.stop(k));
+    ['HUDScene','SearchScene','HideoutChestScene','InventoryScene','PauseScene'].forEach(k => this.scene.stop(k));
     this.player.searching = false;
     this.player.inMenu    = false;
     if (this.bgMusic) { this.bgMusic.stop(); this.bgMusic.destroy(); this.bgMusic = null; }
@@ -358,7 +389,11 @@ export default class GameScene extends Phaser.Scene {
     this.sound.play('sfx_menu', { volume: this.registry.get('sfxVol') ?? 0.5 });
     this.player.searching = true;
     this.player.setVelocity(0, 0);
-    this.scene.launch('SearchScene', { target, inventory: this.inventory, player: this.player, net: this.net });
+    if (target.isHideoutChest) {
+      this.scene.launch('HideoutChestScene', { inventory: this.inventory, player: this.player, net: this.net });
+    } else {
+      this.scene.launch('SearchScene', { target, inventory: this.inventory, player: this.player, net: this.net });
+    }
   }
 
   // ── Open inventory ────────────────────────────────────────────────────
