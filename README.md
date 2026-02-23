@@ -1,6 +1,6 @@
-Voici un guide complet et illustré pour comprendre l'architecture de **RAGEDERUE Online** et aider un développeur débutant à y contribuer.
+Toutes mes excuses pour cette erreur ! Le parseur Mermaid de GitHub est très strict concernant les caractères spéciaux (comme les parenthèses) à l'intérieur des déclarations de nœuds ou de sous-graphes.
 
-Ce document utilise le format Markdown et des diagrammes [Mermaid](https://mermaid.js.org/) (supportés nativement par GitHub et la plupart des éditeurs modernes).
+Voici la version corrigée du guide avec une syntaxe Mermaid épurée (en utilisant des guillemets et en retirant les caractères problématiques) pour garantir un affichage parfait :
 
 ---
 
@@ -13,30 +13,30 @@ Il s'agit d'un jeu multijoueur de type **Beat'em up / Extraction** (vous tapez d
 
 Le projet est divisé en deux parties principales :
 
-1. **Le Client (Frontend)** : Développé en JavaScript pur avec le moteur **Phaser 3**. Il gère l'affichage, les animations, les collisions locales et les inputs du joueur.
-2. **Le Serveur (Backend)** : Développé en **Node.js** avec la librairie `ws`. Il est **autoritaire** : c'est lui qui gère l'IA des ennemis, la génération du loot et le timer de la partie.
+1. **Le Client (Frontend)** : Développé en JavaScript pur avec le moteur **Phaser 3**. Il gère l'affichage, les animations, les collisions locales et les entrées (clavier/manette) du joueur.
+2. **Le Serveur (Backend)** : Développé en **Node.js** avec la librairie `ws`. Il est **autoritaire** : c'est lui qui gère l'IA des ennemis, la génération du butin (loot) et le chronomètre de la partie.
 
 Les deux communiquent en temps réel via des **WebSockets** en utilisant un protocole binaire (pour optimiser la bande passante).
 
 ```mermaid
 graph TD
-    subgraph Client [Client (Navigateur)]
-        P3[Moteur Phaser 3]
-        UI[Interface Utilisateur]
-        ED[Éditeur de Niveau Intégré]
+    subgraph Client ["Client (Navigateur)"]
+        P3["Moteur Phaser 3"]
+        UI["Interface Utilisateur"]
+        ED["Éditeur de Niveau"]
     end
 
-    subgraph Backend [Serveur (Node.js)]
-        WS[Serveur WebSocket - Port 9000]
-        ROOM[Gestion des Rooms & IA]
-        EDS[Serveur Éditeur API - Port 9001]
-        DB[(characters.json)]
+    subgraph Backend ["Serveur (Node.js)"]
+        WS["Serveur WebSocket - Port 9000"]
+        ROOM["Gestion des Rooms & IA"]
+        EDS["Serveur Éditeur API - Port 9001"]
+        DB[("characters.json")]
     end
 
-    P3 <==>|Protocole Binaire (20 Hz)| WS
-    WS -->|Sauvegarde Coffre/Persos| DB
-    ED == POST /levels ==> EDS
-    EDS -.->|Génère| FI[js/config/levels.js]
+    P3 <==>|"Protocole Binaire (20 Hz)"| WS
+    WS -->|"Sauvegarde Coffre/Persos"| DB
+    ED == "POST /levels" ==> EDS
+    EDS -.->|"Génère"| FI["js/config/levels.js"]
 
 ```
 
@@ -72,23 +72,23 @@ Phaser fonctionne avec un système de "Scènes" (`Scenes`). Voici comment le jou
 
 ```mermaid
 graph LR
-    P([PreloadScene]) --> T([TitleScene])
-    T -->|Touche Entrée| C([CharacterScene])
-    T -->|Touche L| ED([LevelEditorScene])
-    T -->|Touche Echap| PA([PauseScene])
+    P(["PreloadScene"]) --> T(["TitleScene"])
+    T -->|"Touche Entrée"| C(["CharacterScene"])
+    T -->|"Touche L"| ED(["LevelEditorScene"])
+    T -->|"Touche Echap"| PA(["PauseScene"])
     
-    C -->|Choix du perso| G([GameScene])
+    C -->|"Choix du perso"| G(["GameScene"])
     
-    G -->|Touche E| S([SearchScene <br>ou HideoutChestScene])
-    G -->|Touche Tab| I([InventoryScene])
-    G -->|Touche Echap| PA
+    G -->|"Touche E"| S(["SearchScene / HideoutChestScene"])
+    G -->|"Touche Tab"| I(["InventoryScene"])
+    G -->|"Touche Echap"| PA
     
-    G -->|Mort ou Temps écoulé| GO([GameOverScene])
-    G -->|Zone d'Extraction| W([WinScene])
+    G -->|"Mort ou Fin chrono"| GO(["GameOverScene"])
+    G -->|"Zone Extraction"| W(["WinScene"])
 
 ```
 
-> **À noter :** La `GameScene` est la scène principale. Quand le joueur ouvre l'inventaire (`InventoryScene`), cette dernière se superpose à la `GameScene` qui continue de tourner en arrière-plan (le jeu ne se met pas en pause).
+> **À noter :** La `GameScene` est la scène principale. Quand le joueur ouvre l'inventaire (`InventoryScene`) ou fouille un objet (`SearchScene`), cette nouvelle scène se superpose à la `GameScene` qui continue de tourner en arrière-plan (le jeu ne se met pas en pause).
 
 ---
 
@@ -103,9 +103,9 @@ Pour éviter la triche et synchroniser tout le monde, le jeu utilise un modèle 
 
 ```mermaid
 sequenceDiagram
-    participant C as Client (Joueur 1)
-    participant S as Serveur (Room)
-    participant C2 as Client (Joueur 2)
+    participant C as Client Joueur 1
+    participant S as Serveur Room
+    participant C2 as Client Joueur 2
 
     C->>S: C_PLAYER_STATE (x:10, y:20)
     C->>S: C_HIT_ENEMY (netId: 5, dégâts: 15)
@@ -156,7 +156,7 @@ medkit: {
 
 
 3. **L'ajouter aux tables de drop :**
-* Toujours dans `lootTable.js`, ajoutez-le dans `CONTAINER_LOOT_TABLE` ou `CORPSE_LOOT_TABLE` en lui donnant un poids ("weight") pour définir sa rareté.
+* Toujours dans `lootTable.js`, ajoutez-le dans `CONTAINER_LOOT_TABLE` ou `CORPSE_LOOT_TABLE` en lui donnant un poids ("weight") pour définir sa probabilité d'apparition.
 
 
 
@@ -164,22 +164,22 @@ medkit: {
 
 RAGEDERUE inclut un éditeur de niveau développé directement dans le jeu. Vous n'avez pas besoin de logiciel externe pour construire la carte !
 
-1. Lancez le jeu via la commande `npm start` (cela lance le client, le serveur de jeu ET le serveur de l'éditeur).
+1. Lancez le jeu via la commande `npm start` (cela lance le client, le serveur de jeu ET le serveur de l'éditeur sur le port 9001).
 2. Sur l'écran titre, appuyez sur la touche **L**.
 3. Vous êtes dans le **Level Editor** (`LevelEditorScene`).
 4. **Contrôles de l'éditeur :**
 * **A/D** (ou Q/D) pour faire défiler la caméra.
 * **Molette** pour zoomer/dézoomer.
 * Cliquez sur les objets de la palette de gauche pour les placer (voitures, tonneaux, zones de téléportation).
-* **Drag & Drop** pour déplacer un objet.
-* Cliquez sur l'onglet **[LOOT ED.]** pour modifier visuellement la base de données des objets (Loot Table).
+* **Drag & Drop** pour déplacer un objet existant.
+* Cliquez sur l'onglet **[LOOT ED.]** en bas à gauche pour modifier visuellement la base de données des objets (Loot Table).
 
 
-5. Appuyez sur **[ SAVE ]** en haut : le serveur local (port 9001) va automatiquement générer et réécrire le fichier `js/config/levels/level_XX.js`.
+5. Appuyez sur **[ SAVE ]** en haut : le serveur local va automatiquement générer et réécrire le fichier `js/config/levels/level_XX.js`.
 
 ### 5.3 Ajouter une nouvelle fonctionnalité au Serveur
 
-Si vous devez ajouter une interaction complexe (ex: ouvrir une porte avec une clé), vous devrez modifier le protocole réseau.
+Si vous devez ajouter une interaction complexe (ex: ouvrir une porte avec une clé), vous devrez modifier le protocole réseau commun.
 
 1. **Déclarer le message :** Dans `js/network/NetProtocol.js` (client) ET `server/Protocol.js` (serveur), ajoutez un identifiant :
 ```javascript
@@ -188,12 +188,12 @@ export const C_OPEN_DOOR = 0x14; // Client vers Serveur
 ```
 
 
-2. **Côté Client :** Dans `NetworkManager.js`, créez une fonction pour envoyer ce message via WebSocket (`this.ws.send(...)`).
-3. **Côté Serveur :** Dans `server/index.js`, interceptez ce type de message dans la fonction `ws.on('message', ...)` et appliquez la logique (vérifier si le joueur a la clé, puis envoyer un message à tous les joueurs pour dire que la porte est ouverte).
+2. **Côté Client :** Dans `js/network/NetworkManager.js`, créez une fonction pour envoyer ce message via WebSocket (`this.ws.send(...)`).
+3. **Côté Serveur :** Dans `server/index.js`, interceptez ce type de message dans le bloc `ws.on('message', ...)` et appliquez la logique (vérifier si le joueur a la clé, modifier l'état, puis relayer l'information aux autres joueurs).
 
 ---
 
 ## 6. Outils de Débogage
 
-* **Serveur Monitor :** Ouvrez `server.html` dans votre navigateur. C'est un tableau de bord qui interroge l'API `http://localhost:9000/stats` et vous permet de voir en temps réel les performances du serveur (RAM, ms par tick, nombre d'ennemis, positions des joueurs).
-* **Hitboxes visuelles :** Dans `js/config/constants.js`, passez `export const DEBUG_HITBOXES = true;` pour afficher les rectangles de collision (coups de poings, blessures) dans le client.
+* **Serveur Monitor :** Ouvrez `server.html` dans votre navigateur. C'est un tableau de bord graphique qui interroge l'API `http://localhost:9000/stats` et vous permet de voir en temps réel les performances du serveur (RAM, ms par tick, nombre d'ennemis, trafic réseau, positions des joueurs).
+* **Hitboxes visuelles :** Dans `js/config/constants.js`, modifiez la constante `export const DEBUG_HITBOXES = true;` pour afficher les rectangles de collision (coups de poings, blessures) sur le client afin d'ajuster l'équilibrage des coups.
