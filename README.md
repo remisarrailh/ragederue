@@ -1,9 +1,3 @@
-Toutes mes excuses pour cette erreur ! Le parseur Mermaid de GitHub est très strict concernant les caractères spéciaux (comme les parenthèses) à l'intérieur des déclarations de nœuds ou de sous-graphes.
-
-Voici la version corrigée du guide avec une syntaxe Mermaid épurée (en utilisant des guillemets et en retirant les caractères problématiques) pour garantir un affichage parfait :
-
----
-
 # 📖 Guide de Contribution : RAGEDERUE Online
 
 Bienvenue dans le code de **RAGEDERUE Online** !
