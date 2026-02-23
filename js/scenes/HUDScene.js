@@ -1,4 +1,4 @@
-import { GAME_W, PLAYER_MAX_HP } from '../config/constants.js';
+import { GAME_W } from '../config/constants.js';
 
 const PAD = 14;
 const BAR_W = 160;
@@ -48,6 +48,33 @@ export default class HUDScene extends Phaser.Scene {
       fontFamily: 'monospace', fontSize: '10px', color: '#8888aa',
     }).setOrigin(1, 0.5).setScrollFactor(0).setDepth(501);
 
+    // ── Stamina bar ──────────────────────────────────────────────────────
+    this.add.rectangle(PAD + 22, PAD + 22, BAR_W, BAR_H, 0x332200)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(500);
+    this._stFill = this.add.rectangle(PAD + 22, PAD + 22, BAR_W, BAR_H, 0xffee00)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(501);
+    this._stText = this.add.text(PAD + 22 + BAR_W + 8, PAD + 22, '', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#ffee88',
+    }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(501);
+
+    // ── Hunger bar ───────────────────────────────────────────────────────
+    this.add.rectangle(PAD + 22, PAD + 40, BAR_W, BAR_H, 0x331100)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(500);
+    this._hgFill = this.add.rectangle(PAD + 22, PAD + 40, BAR_W, BAR_H, 0xff8833)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(501);
+    this._hgText = this.add.text(PAD + 22 + BAR_W + 8, PAD + 40, '', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#ffbb88',
+    }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(501);
+
+    // ── Thirst bar ───────────────────────────────────────────────────────
+    this.add.rectangle(PAD + 22, PAD + 58, BAR_W, BAR_H, 0x001133)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(500);
+    this._thFill = this.add.rectangle(PAD + 22, PAD + 58, BAR_W, BAR_H, 0x00ccff)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(501);
+    this._thText = this.add.text(PAD + 22 + BAR_W + 8, PAD + 58, '', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#88eeff',
+    }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(501);
+
     this._updateHP();
   }
 
@@ -55,6 +82,9 @@ export default class HUDScene extends Phaser.Scene {
     if (!this.player) return;
 
     this._updateHP();
+    this._updateStamina();
+    this._updateHunger();
+    this._updateThirst();
 
     const gs = this.scene.get('GameScene');
     if (!gs || gs._gameEnded) return;
@@ -87,5 +117,36 @@ export default class HUDScene extends Phaser.Scene {
     const g = Math.round(Phaser.Math.Linear(0xff, 0x00, 1 - ratio));
     this._hpFill.setFillStyle(Phaser.Display.Color.GetColor(r, g, 0x22));
     this._hpText.setText(`${this.player.hp}/${this.player.maxHp}`);
+  }
+
+  _updateStamina() {
+    const ratio = Phaser.Math.Clamp(this.player.stamina / this.player.maxStamina, 0, 1);
+    this._stFill.setSize(Math.max(0, Math.round(BAR_W * ratio)), BAR_H);
+    // jaune → orange quand la stamina descend
+    const r = Math.round(Phaser.Math.Linear(0xff, 0xff, 1 - ratio));
+    const g = Math.round(Phaser.Math.Linear(0xee, 0x44, 1 - ratio));
+    this._stFill.setFillStyle(Phaser.Display.Color.GetColor(r, g, 0x00));
+    this._stText.setText(`${Math.round(this.player.stamina)}/${this.player.maxStamina}`);
+  }
+
+  _updateHunger() {
+    const ratio = Phaser.Math.Clamp(this.player.hunger / this.player.maxHunger, 0, 1);
+    this._hgFill.setSize(Math.max(0, Math.round(BAR_W * ratio)), BAR_H);
+    // orange → rouge quand la faim monte
+    const r = Math.round(Phaser.Math.Linear(0xff, 0xff, 1 - ratio));
+    const g = Math.round(Phaser.Math.Linear(0x88, 0x11, 1 - ratio));
+    this._hgFill.setFillStyle(Phaser.Display.Color.GetColor(r, g, 0x00));
+    this._hgText.setText(`${Math.round(this.player.hunger)}/${this.player.maxHunger}`);
+  }
+
+  _updateThirst() {
+    const ratio = Phaser.Math.Clamp(this.player.thirst / this.player.maxThirst, 0, 1);
+    this._thFill.setSize(Math.max(0, Math.round(BAR_W * ratio)), BAR_H);
+    // cyan → bleu foncé quand la soif monte
+    const r = 0x00;
+    const g = Math.round(Phaser.Math.Linear(0x44, 0xcc, ratio));
+    const b = Math.round(Phaser.Math.Linear(0x88, 0xff, ratio));
+    this._thFill.setFillStyle(Phaser.Display.Color.GetColor(r, g, b));
+    this._thText.setText(`${Math.round(this.player.thirst)}/${this.player.maxThirst}`);
   }
 }

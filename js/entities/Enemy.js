@@ -270,7 +270,7 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
 
     this.facing = dx > 0 ? 1 : -1;
     this.setVelocity(nx * this.speed, ny * this.speed * 0.6);
-    this.y = Phaser.Math.Clamp(this.y, LANE_TOP, LANE_BOTTOM);
+    this.y = Phaser.Math.Clamp(this.y, this.scene.laneTop ?? LANE_TOP, this.scene.laneBottom ?? LANE_BOTTOM);
 
     // Sprite faces LEFT natively → flipX=true makes it face right
     this.setFlipX(this.facing > 0);

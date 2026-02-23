@@ -7,7 +7,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "server": "node server/index.js",
-    "start": "concurrently \"npm run server\" \"npm run dev\""
+    "editor": "node server/editor-server.js",
+    "start": "concurrently \"npm run server\" \"npm run editor\" \"npm run dev\""
   },
   "dependencies": {
     "ws": "^8.19.0"

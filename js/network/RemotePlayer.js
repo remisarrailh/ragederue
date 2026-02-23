@@ -84,7 +84,7 @@ export default class RemotePlayer extends Phaser.Physics.Arcade.Sprite {
     this.y += (this._targetY - this.y) * lerp;
 
     // Clamp to lane
-    this.y = Phaser.Math.Clamp(this.y, LANE_TOP, LANE_BOTTOM);
+    this.y = Phaser.Math.Clamp(this.y, this.scene.laneTop ?? LANE_TOP, this.scene.laneBottom ?? LANE_BOTTOM);
 
     // Update name tag
     this._nameTag.setPosition(this.x, this.y - 50);

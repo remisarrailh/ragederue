@@ -12,7 +12,8 @@ export default class PauseScene extends Phaser.Scene {
   }
 
   create(data) {
-    this._fromScene = (data && data.fromScene) || 'GameScene';
+    this._fromScene  = (data && data.fromScene)  || 'GameScene';
+    this._fromEditor = !!(data && data.fromEditor);
 
     // ── Semi-transparent overlay ──────────────────────────────────────────
     this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.7)
@@ -53,6 +54,21 @@ export default class PauseScene extends Phaser.Scene {
     this._buildSoundTab();
     this._switchTab(TAB_CONTROLS);
 
+    // ── Bouton retour éditeur (mode test uniquement) ──────────────────────
+    if (this._fromEditor) {
+      const btnEditor = this.add.text(GAME_W / 2, GAME_H * 0.82, '[ RETOUR ÉDITEUR ]', {
+        fontFamily: 'monospace', fontSize: '18px', color: '#4488ff',
+        stroke: '#000000', strokeThickness: 3,
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      btnEditor.on('pointerdown', () => this._exitToEditor());
+      btnEditor.on('pointerover', () => btnEditor.setColor('#88bbff'));
+      btnEditor.on('pointerout',  () => btnEditor.setColor('#4488ff'));
+
+      this.add.text(GAME_W / 2, GAME_H * 0.88, 'Touche  R  — quitter le test', {
+        fontFamily: 'monospace', fontSize: '11px', color: '#446688',
+      }).setOrigin(0.5);
+    }
+
     // ── Resume hint ───────────────────────────────────────────────────────
     const hint = this.add.text(GAME_W / 2, GAME_H * 0.94, 'ESC / Start: close   Q / L1: switch tab', {
       fontFamily: 'monospace', fontSize: '11px', color: '#888888',
@@ -61,7 +77,10 @@ export default class PauseScene extends Phaser.Scene {
 
     // ── Input ─────────────────────────────────────────────────────────────
     this.input.keyboard.on('keydown-ESC', () => this._resume());
-    this.input.keyboard.on('keydown-Q', () => this._nextTab());
+    this.input.keyboard.on('keydown-Q',   () => this._nextTab());
+    if (this._fromEditor) {
+      this.input.keyboard.on('keydown-R', () => this._exitToEditor());
+    }
     this.input.gamepad.on('down', (pad, button) => {
       if (button.index === 9) this._resume();   // Start
       if (button.index === 4) this._nextTab();   // L1
@@ -398,6 +417,16 @@ export default class PauseScene extends Phaser.Scene {
       if (gameScene && gameScene.player) {
         gameScene.player.inMenu = false;
       }
+    }
+    this.scene.stop();
+  }
+
+  _exitToEditor() {
+    // Déclenche _endGame sur GameScene → qui retourne à LevelEditorScene (fromEditor=true)
+    const gameScene = this.scene.get('GameScene');
+    if (gameScene && gameScene.player) {
+      gameScene.player.inMenu = false;
+      gameScene._endGame('over', '');
     }
     this.scene.stop();
   }

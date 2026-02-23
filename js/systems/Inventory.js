@@ -74,6 +74,12 @@ export default class Inventory {
     if (item.def.healAmount > 0) {
       player.hp = Math.min(player.maxHp, player.hp + item.def.healAmount);
     }
+    if (item.def.hungerRestore > 0) {
+      player.hunger = Math.min(player.maxHunger, player.hunger + item.def.hungerRestore);
+    }
+    if (item.def.thirstRestore > 0) {
+      player.thirst = Math.min(player.maxThirst, player.thirst + item.def.thirstRestore);
+    }
     if (item.def.value > 0) {
       player.wallet = (player.wallet ?? 0) + item.def.value;
     }

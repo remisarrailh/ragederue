@@ -1,0 +1,38 @@
+/** level_01.js — Street 01 */
+export default {
+  id: 'level_01',
+  name: 'Street 01',
+  worldW: 10170,
+  parallax: { bg: 0.065, mid: 0.5 },
+  background: 'street_background',
+  laneTop: 100,
+  props: [
+    { type: 'car', x: 632, y: 422, scale: 1.1388888888888888 },
+    { type: 'car', x: 2200, y: 345, scale: 1.1388888888888888 },
+    { type: 'barrel', x: 800, y: 420, scale: 1 },
+    { type: 'barrel', x: 1800, y: 410, scale: 0.9 },
+    { type: 'hydrant', x: 1100, y: 335, scale: 0.65 },
+    { type: 'hydrant', x: 2600, y: 340, scale: 0.65 },
+    { type: 'car', x: 305, y: 340, scale: 1.1388888888888888, blocksPlayer: true },
+    { type: 'car', x: 493, y: 358, scale: 1.1388888888888888 },
+    { type: 'banner-hor1', x: 394, y: 208, scale: 1.7808219178082192 },
+    { type: 'fore', x: 229, y: 230, scale: 1.2 },
+  ],
+  containers: [
+    { x: 371, y: 410, texture: 'barrel' },
+    { x: 780, y: 450, texture: 'barrel' },
+    { x: 1200, y: 390, texture: 'barrel' },
+    { x: 1700, y: 455, texture: 'barrel' },
+    { x: 2350, y: 395, texture: 'barrel' },
+    { x: 3100, y: 445, texture: 'barrel' },
+  ],
+  transitZones: [
+    { id: 'zone_1771807424563', type: 'warp', x: 3974, y: 88, width: 118, height: 202, targetLevel: 'level_03', label: 'Planque' },
+    { id: 'zone_1771847060713', type: 'warp', x: 4343, y: 124, width: 162, height: 167, targetLevel: null, label: 'WARP' },
+    { id: 'zone_1771855378689', type: 'warp', x: 916, y: 124, width: 159, height: 168, targetLevel: null, label: 'WARP' },
+    { id: 'zone_1771855511217', type: 'warp', x: 6867, y: 125, width: 160, height: 165, targetLevel: null, label: 'WARP' },
+    { id: 'zone_1771855527362', type: 'warp', x: 8520, y: 95, width: 116, height: 194, targetLevel: null, label: 'WARP' },
+    { id: 'zone_1771855537129', type: 'warp', x: 8892, y: 121, width: 159, height: 169, targetLevel: null, label: 'WARP' },
+    { id: 'zone_1771855550857', type: 'warp', x: 9102, y: 110, width: 116, height: 179, targetLevel: null, label: 'WARP' },
+  ],
+};

@@ -231,8 +231,8 @@ export default class InventoryScene extends Phaser.Scene {
     const item = entry.item;
     if (!item.identified) return;
 
-    // Non-usable items (value only, no use time)
-    if (item.def.useTime <= 0 && item.def.healAmount <= 0) return;
+    // Non-usable items (value only, no consumable effect)
+    if (item.def.useTime <= 0 && !item.def.healAmount && !item.def.hungerRestore && !item.def.thirstRestore) return;
 
     this._isUsing = true;
     this._useBarBg.setVisible(true);

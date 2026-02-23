@@ -1,7 +1,7 @@
 import { LANE_TOP, LANE_BOTTOM, DEBUG_DEPTH } from '../config/constants.js';
 
 /** Fixed scale for all entities (2× original size). */
-const ENTITY_SCALE = 2.0;
+const ENTITY_SCALE = 3.0;
 
 /**
  * Update depth-based render order for an entity.

@@ -47,19 +47,40 @@ export default class TitleScene extends Phaser.Scene {
       color: '#888888',
     }).setOrigin(0.5);
 
-    // ── Controls hint ─────────────────────────────────────────────────────
-    const controls = [
-      'WASD / Arrows ── Move',
+    // ── Level editor hint ─────────────────────────────────────────────────
+    this.add.text(GAME_W / 2, GAME_H * 0.71, 'L : LEVEL EDITOR', {
+      fontFamily: 'monospace',
+      fontSize: '14px',
+      color: '#4488ff',
+    }).setOrigin(0.5);
+
+    // ── Controls hint (layout-aware) ──────────────────────────────────────
+    const controlsText = this.add.text(GAME_W / 2, GAME_H * 0.84, [
+      'WASD / ZQSD / Arrows ── Move',
       'X ── Punch    C ── Kick    V ── Jab',
       'SPACE ── Jump',
-    ];
-    this.add.text(GAME_W / 2, GAME_H * 0.78, controls.join('\n'), {
+    ].join('\n'), {
       fontFamily: 'monospace',
       fontSize: '12px',
       color: '#666666',
       align: 'center',
       lineSpacing: 6,
     }).setOrigin(0.5);
+
+    // Détecte la disposition du clavier de façon asynchrone
+    // et affine le hint de mouvement si possible.
+    this._detectLayout().then(layout => {
+      if (!this.scene.isActive()) return;   // scène déjà quittée
+      this.registry.set('kbLayout', layout);
+      const moveHint = layout === 'azerty'
+        ? 'ZQSD / Flèches ── Déplacement'
+        : 'WASD / Arrows ── Move';
+      controlsText.setText([
+        moveHint,
+        'X ── Punch    C ── Kick    V ── Jab',
+        'SPACE ── Jump',
+      ].join('\n'));
+    });
 
     // ── Music (naval) ─────────────────────────────────────────────────────
     this.sound.stopByKey('music_naval');
@@ -81,6 +102,7 @@ export default class TitleScene extends Phaser.Scene {
       if (button.index === 8) this._openSettings();  // Select
     });
     this.input.keyboard.on('keydown-ESC', () => this._openSettings());
+    this.input.keyboard.on('keydown-L',   () => this._openEditor());
   }
 
   _go() {
@@ -102,5 +124,32 @@ export default class TitleScene extends Phaser.Scene {
     }
     this.sound.play('sfx_menu', { volume: this.registry.get('sfxVol') ?? 0.5 });
     this.scene.launch('PauseScene', { fromScene: 'TitleScene' });
+  }
+
+  _openEditor() {
+    if (this._started) return;
+    this._started = true;
+    if (this.bgMusic) { this.bgMusic.stop(); this.bgMusic.destroy(); this.bgMusic = null; }
+    this.scene.start('LevelEditorScene');
+  }
+
+  /**
+   * Détecte la disposition du clavier.
+   * Méthode 1 : navigator.keyboard.getLayoutMap() — précis, Chrome uniquement.
+   * Méthode 2 : navigator.language — heuristique (fr/be → AZERTY).
+   * @returns {Promise<'azerty'|'qwerty'>}
+   */
+  async _detectLayout() {
+    try {
+      if (navigator.keyboard?.getLayoutMap) {
+        const map = await navigator.keyboard.getLayoutMap();
+        // Sur AZERTY : la touche physique Q (KeyQ) produit 'a'
+        // Sur QWERTY : la touche physique Q (KeyQ) produit 'q'
+        return map.get('KeyQ') === 'a' ? 'azerty' : 'qwerty';
+      }
+    } catch { /* API non disponible ou refusée */ }
+    // Fallback : langue du navigateur
+    const lang = (navigator.language ?? '').toLowerCase();
+    return (lang.startsWith('fr') || lang.startsWith('be')) ? 'azerty' : 'qwerty';
   }
 }

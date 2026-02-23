@@ -1,5 +1,6 @@
 import { registerAnimations } from '../config/animations.js';
 import { FRAME_W, FRAME_H } from '../config/constants.js';
+import { BACKGROUNDS } from '../config/backgrounds.js';
 
 const BG = 'assets/Spritesheets/Brawler Girl/';
 const EP = 'assets/Spritesheets/Enemy Punk/';
@@ -38,10 +39,21 @@ export default class PreloadScene extends Phaser.Scene {
     this.load.image('fore',    ST + 'fore.png');
     this.load.image('tileset', ST + 'tileset.png');
 
+    // ── Backgrounds (auto-découverte via Vite glob) ───────────────────
+    for (const { key, url } of BACKGROUNDS) {
+      this.load.image(key, url);
+    }
+
     // ── Props ────────────────────────────────────────────────────────────
-    this.load.image('barrel',  PR + 'barrel.png');
-    this.load.image('car',     PR + 'car.png');
-    this.load.image('hydrant', PR + 'hydrant.png');
+    this.load.image('barrel',      PR + 'barrel.png');
+    this.load.image('car',         PR + 'car.png');
+    this.load.image('hydrant',     PR + 'hydrant.png');
+    this.load.image('banner-hor1', PR + 'banner-hor/banner-hor1.png');
+    this.load.image('banner-hor2', PR + 'banner-hor/banner-hor2.png');
+    this.load.image('eth-prop-1',  PR + 'Ethereum/ethereum-1.png');
+    this.load.image('eth-prop-2',  PR + 'Ethereum/ethereum-2.png');
+    this.load.image('sushi-prop-1',PR + 'Sushi/sushi-1.png');
+    this.load.image('sushi-prop-2',PR + 'Sushi/sushi-2.png');
 
     // ── Brawler Girl ─────────────────────────────────────────────────────
     const fw = FRAME_W, fh = FRAME_H;

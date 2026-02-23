@@ -21,7 +21,7 @@ export default class RemoteEnemy extends Enemy {
     const lerp = Math.min(1, 10 * (this.scene.game.loop.delta / 1000));
     this.x += (this._targetX - this.x) * lerp;
     this.y += (this._targetY - this.y) * lerp;
-    this.y = Phaser.Math.Clamp(this.y, LANE_TOP, LANE_BOTTOM);
+    this.y = Phaser.Math.Clamp(this.y, this.scene.laneTop ?? LANE_TOP, this.scene.laneBottom ?? LANE_BOTTOM);
     updateDepth(this);
   }
 

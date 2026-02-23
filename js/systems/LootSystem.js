@@ -1,5 +1,4 @@
 import Container from '../entities/Container.js';
-import { CONTAINER_SPAWNS } from '../config/lootTable.js';
 
 const SEARCH_RADIUS = 64;   // px – distance to interact with a container/body
 
@@ -12,9 +11,13 @@ export default class LootSystem {
     this.nearestTarget = null;
   }
 
-  /** Spawn every container defined in CONTAINER_SPAWNS. Call once from GameScene.create(). */
-  spawnContainers() {
-    CONTAINER_SPAWNS.forEach((def, i) => {
+  /**
+   * Spawn containers from a level config containers array.
+   * Call once from GameScene.create().
+   * @param {Array<{x:number, y:number, texture:string}>} containers
+   */
+  spawnContainers(containers) {
+    containers.forEach((def, i) => {
       this.containers.push(
         new Container(this.scene, def.x, def.y, def.texture, {
           netId: i,

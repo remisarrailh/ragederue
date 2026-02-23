@@ -1,7 +1,12 @@
 import {
   PLAYER_SPEED, LANE_TOP, LANE_BOTTOM,
   PLAYER_MAX_HP, PLAYER_INVINCIBLE_MS,
-  JUMP_DURATION, JUMP_HEIGHT
+  JUMP_DURATION, JUMP_HEIGHT,
+  PLAYER_MAX_STAMINA, STAMINA_REGEN_RATE, STAMINA_REGEN_DELAY_MS,
+  STAMINA_COST_PUNCH, STAMINA_COST_KICK, STAMINA_COST_JAB, STAMINA_COST_JUMP,
+  STAMINA_LOW_THRESHOLD, STAMINA_DMG_MIN_MULT, STAMINA_SPD_MIN_MULT,
+  PLAYER_MAX_HUNGER, HUNGER_DRAIN_RATE, HUNGER_DAMAGE_RATE,
+  PLAYER_MAX_THIRST, THIRST_DRAIN_RATE, THIRST_DAMAGE_RATE,
 } from '../config/constants.js';
 import { updateDepth, createShadow } from '../systems/DepthSystem.js';
 
@@ -43,6 +48,19 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.hp    = PLAYER_MAX_HP;
     this.maxHp = PLAYER_MAX_HP;
     this.combat = combat;
+
+    // ── Survie ─────────────────────────────────────────────────────────────
+    this.stamina            = PLAYER_MAX_STAMINA;
+    this.maxStamina         = PLAYER_MAX_STAMINA;
+    this._staminaRegenTimer = 0;   // ms restants avant regen
+
+    this.hunger           = PLAYER_MAX_HUNGER;
+    this.maxHunger        = PLAYER_MAX_HUNGER;
+    this._hungerDmgAccum  = 0;    // ms accumulées pour tick dégât faim
+
+    this.thirst           = PLAYER_MAX_THIRST;
+    this.maxThirst        = PLAYER_MAX_THIRST;
+    this._thirstDmgAccum  = 0;    // ms accumulées pour tick dégât soif
 
     // ── State machine ──────────────────────────────────────────────────────
     this.state        = 'idle';   // idle | walk | punch | kick | jab | jump | jump_kick | hurt
@@ -88,7 +106,9 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       const hb = HITBOXES[anim.key];
       const activeFrames = ACTIVE_FRAMES[anim.key];
       if (hb && activeFrames && activeFrames.includes(frame.index)) {
-        this.combat.activateHitbox(this, hb.offsetX, hb.offsetY, hb.w, hb.h, hb.dmg, hb.kb);
+        const dmgMult = Phaser.Math.Clamp(this.stamina / this.maxStamina, STAMINA_DMG_MIN_MULT, 1.0);
+        const dmg = Math.max(1, Math.round(hb.dmg * dmgMult));
+        this.combat.activateHitbox(this, hb.offsetX, hb.offsetY, hb.w, hb.h, dmg, hb.kb);
       }
     });
 
@@ -97,6 +117,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     // qui gère la fin du stunlock (voir takeHit).
     this.on('animationcomplete', (anim) => {
       if (this.combat) this.combat.deactivateHitboxes(this);
+      this.anims.timeScale = 1.0;
 
       const attackAnims = ['player_punch', 'player_kick', 'player_jab'];
       if (attackAnims.includes(anim.key)) {
@@ -147,6 +168,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     }
 
     this._handleAttackInput();
+    this._updateSurvival();
     updateDepth(this);
   }
 
@@ -226,6 +248,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     // ── Airborne: allow jump kick ──────────────────────────────────────
     if (this._isAirborne) {
       if ((kickDown || punchDown) && this.state === 'jump') {
+        this._drainStamina(STAMINA_COST_KICK);
         this._jumpKick();
       }
       return;
@@ -233,14 +256,23 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
     // ── Ground actions ─────────────────────────────────────────────
     if (jumpDown && this.state !== 'punch' && this.state !== 'kick' && this.state !== 'jab') {
-      this._startJump();
+      if (this.stamina >= this.maxStamina * STAMINA_LOW_THRESHOLD) {
+        this._drainStamina(STAMINA_COST_JUMP);
+        this._startJump();
+      }
     } else if (punchDown) {
+      this._drainStamina(STAMINA_COST_PUNCH);
+      this.anims.timeScale = Math.max(STAMINA_SPD_MIN_MULT, this.stamina / this.maxStamina);
       this.state = 'punch';
       this.play('player_punch', true);
     } else if (kickDown) {
+      this._drainStamina(STAMINA_COST_KICK);
+      this.anims.timeScale = Math.max(STAMINA_SPD_MIN_MULT, this.stamina / this.maxStamina);
       this.state = 'kick';
       this.play('player_kick', true);
     } else if (jabDown) {
+      this._drainStamina(STAMINA_COST_JAB);
+      this.anims.timeScale = Math.max(STAMINA_SPD_MIN_MULT, this.stamina / this.maxStamina);
       this.state = 'jab';
       this.play('player_jab', true);
     }
@@ -277,6 +309,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
   _jumpKick() {
     this.state = 'jump_kick';
+    this.anims.timeScale = Math.max(STAMINA_SPD_MIN_MULT, this.stamina / this.maxStamina);
     this.play('player_jump_kick', true);
   }
 
@@ -287,6 +320,44 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       this.state = 'idle';
       this.play('player_idle', true);
     }
+  }
+
+  _updateSurvival() {
+    if (this.state === 'dead') return;
+    const dt    = this.scene.game.loop.delta;
+    const dtSec = dt / 1000;
+
+    // Stamina — regen différée après action
+    if (this._staminaRegenTimer > 0) {
+      this._staminaRegenTimer = Math.max(0, this._staminaRegenTimer - dt);
+    } else {
+      this.stamina = Math.min(this.maxStamina, this.stamina + STAMINA_REGEN_RATE * dtSec);
+    }
+
+    // Faim — drain passif, dégât si vide
+    this.hunger = Math.max(0, this.hunger - HUNGER_DRAIN_RATE * dtSec);
+    if (this.hunger <= 0) {
+      this._hungerDmgAccum += dt;
+      if (this._hungerDmgAccum >= 1000) {
+        this._hungerDmgAccum -= 1000;
+        this.hp = Math.max(0, this.hp - HUNGER_DAMAGE_RATE);
+      }
+    } else { this._hungerDmgAccum = 0; }
+
+    // Soif — drain passif, dégât si vide
+    this.thirst = Math.max(0, this.thirst - THIRST_DRAIN_RATE * dtSec);
+    if (this.thirst <= 0) {
+      this._thirstDmgAccum += dt;
+      if (this._thirstDmgAccum >= 1000) {
+        this._thirstDmgAccum -= 1000;
+        this.hp = Math.max(0, this.hp - THIRST_DAMAGE_RATE);
+      }
+    } else { this._thirstDmgAccum = 0; }
+  }
+
+  _drainStamina(amount) {
+    this.stamina = Math.max(0, this.stamina - amount);
+    this._staminaRegenTimer = STAMINA_REGEN_DELAY_MS;
   }
 
   _handleMovement(cursors, wasd) {
@@ -334,8 +405,9 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       }
     }
 
+    if (this.stamina <= 0) { vx *= 0.6; vy *= 0.6; }
     this.setVelocity(vx, vy);
-    this.y = Phaser.Math.Clamp(this.y, LANE_TOP, LANE_BOTTOM);
+    this.y = Phaser.Math.Clamp(this.y, this.scene.laneTop ?? LANE_TOP, this.scene.laneBottom ?? LANE_BOTTOM);
 
     if (vx < 0)      { this.setFlipX(true);  this.facing = -1; }
     else if (vx > 0) { this.setFlipX(false); this.facing =  1; }

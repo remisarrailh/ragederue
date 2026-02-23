@@ -16,13 +16,24 @@ export default class InputController {
     const scene = this.scene;
     const { onInteract, onInventory, onSettings } = callbacks;
 
-    // ── Cursor / WASD keys ───────────────────────────────────────────────
+    // ── Cursor / WASD+ZQSD keys ──────────────────────────────────────────
+    // ZQSD = AZERTY equivalent of WASD (same physical positions).
+    // We support both simultaneously so AZERTY/QWERTY users need no setup.
     this.cursors = scene.input.keyboard.createCursorKeys();
+    const kb = scene.input.keyboard;
+    const w = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+    const a = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+    const s = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+    const d = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    const z = kb.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
+    const q = kb.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+    // Composite keys: .isDown if either WASD or ZQSD key is held
+    const combo = (k1, k2) => ({ get isDown() { return k1.isDown || k2.isDown; } });
     this.wasd = {
-      up:    scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-      down:  scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-      left:  scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
-      right: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+      up:    combo(w, z),
+      down:  combo(s, s),   // S is the same key in both layouts
+      left:  combo(a, q),
+      right: combo(d, d),   // D is the same key in both layouts
     };
 
     // ── Keyboard event listeners ─────────────────────────────────────────
