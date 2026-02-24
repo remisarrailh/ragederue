@@ -1,3 +1,14 @@
+# Assets
+
+* Bouteille d'eau
+* Boisson canette
+* Vis
+* Clou
+* Planche en bois
+* Tuyau
+
+# 
+
 # Correctif
 
 * Joueur dans la planque n'est pas synchro (il faut que le déplacement des joueurs soit synchro)
@@ -5,6 +16,9 @@
 * Image des objets dans le coffre plutôt que texte
 * Coffre commun à tous les joueurs
 * Tri des objets par type (soin/argent etc...)
+* Reset vie/autres dans la planque quand on rentre (elle devrait remonter doucement)
+
+
 
 
 
@@ -40,6 +54,9 @@
 * Coffre : Permet de stocker plus d'objets
 * Gym : Permet d'augmenter des compétences
 * Atelier : Permet de fabriquer des armes
+* Spawn des ennemis à revoir (pas forcément en adéquation selon la taille du niveau) ex: level1 les ennemis apparaissent au milieu du niveau et ils n'arrivent pas à se
+
+déplacer dans tout le niveau
 
 
 
@@ -64,6 +81,7 @@ Les améliorations demandent des objets (vis/clous/tuyaux/etc...) et peuvent avo
 # Ennemis
 
 * Ajouter des nouveaux types d'ennemis
+* Les ennemis peuvent avoir des armes différentes aléatoires
 * Ajouter des boss à des positions semi aléatoire (position fixe possible multiples)
 
 
@@ -87,6 +105,7 @@ Les améliorations demandent des objets (vis/clous/tuyaux/etc...) et peuvent avo
 * Par exemple l'objet ne doit pas avoir une hitbox trop basique, sinon on ne peut pas passer au dessus et au dessous
 * Possibilité de revive un joueur qui est à terre
 * Possibilité de se soigner entre joueur
+* En cas de mort tout à 10% (pénalité en cas de mort)
 
 
 
