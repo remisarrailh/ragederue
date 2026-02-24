@@ -15,6 +15,8 @@ const http = require('http');
 const Room = require('./Room');
 const Protocol = require('./Protocol');
 const CharacterStore = require('./CharacterStore');
+const { xpToLevel } = CharacterStore;
+const { getLevelConfig } = require('./levelConfigs');
 
 // Characters currently in-game: Set of charId strings
 const activeChars = new Set();
@@ -27,7 +29,9 @@ const rooms = new Map();
 function getOrCreateRoom(name) {
   if (!rooms.has(name)) {
     console.log(`[Server] Creating room: ${name}`);
-    const room = new Room(name);
+    // Map room name to level id (room name IS the level id for now)
+    const levelCfg = getLevelConfig(name);
+    const room = new Room(name, levelCfg);
     rooms.set(name, room);
   }
   return rooms.get(name);
@@ -47,6 +51,9 @@ const httpServer = http.createServer((req, res) => {
   if (req.url === '/stats') {
     const mem = process.memoryUsage();
     const cpuUsage = process.cpuUsage();
+    // Count players that are actually in a room (sent C_JOIN)
+    let playersInRoom = 0;
+    for (const room of rooms.values()) playersInRoom += room.players.size;
     const stats = {
       uptime: Math.round(process.uptime()),
       memory: {
@@ -58,7 +65,8 @@ const httpServer = http.createServer((req, res) => {
         user:   Math.round(cpuUsage.user   / 1000),
         system: Math.round(cpuUsage.system / 1000),
       },
-      connections: wss.clients.size,
+      connections: wss.clients.size,     // total WS connections (includes raw/planque)
+      playersInRoom,                     // players that sent C_JOIN and are in a room
       rooms: Array.from(rooms.values()).map(r => r.getStats()),
     };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -107,16 +115,36 @@ wss.on('connection', (ws) => {
 
     switch (type) {
       case Protocol.C_JOIN: {
-        const { name, room: roomName } = Protocol.decodeJoin(data);
+        const { name, room: roomName, charId: joinCharId } = Protocol.decodeJoin(data);
         player.name = name;
 
-        // Join room
+        // Set charId from JOIN if provided (GameScene sends it)
+        if (joinCharId && !player.charId) {
+          player.charId = joinCharId;
+          console.log(`[Server] charId set from JOIN: ${joinCharId}`);
+        }
+
+        // If already in a room (zone change on a reused connection) — leave first
+        if (player.room) {
+          player.room.removePlayer(player);
+          player.room.broadcast(Protocol.encodePlayerLeave(player.id));
+          console.log(`[Server] ${player.name} (id=${player.id}) left room "${player.room.name}" (zone change)`);
+          player.room = null;
+        }
+
+        // Join new room
         const room = getOrCreateRoom(roomName);
         room.addPlayer(player);
         player.room = room;
 
         // Send welcome with assigned ID
         ws.send(Protocol.encodeWelcome(player.id), { binary: true });
+
+        // Send skills if charId is known
+        if (player.charId) {
+          const skills = CharacterStore.getSkills(player.charId) ?? {};
+          ws.send(Protocol.encodeSkills(skills), { binary: true });
+        }
 
         // Notify others in the room
         room.broadcast(Protocol.encodePlayerJoin(player.id, player.name), player.id);
@@ -175,6 +203,9 @@ wss.on('connection', (ws) => {
           // Send chest contents to the client
           const char = CharacterStore.getById(value);
           if (char) ws.send(Protocol.encodeChestData(char.chestItems || []), { binary: true });
+          // Send skill state to the client
+          const skills = CharacterStore.getSkills(value) ?? {};
+          ws.send(Protocol.encodeSkills(skills), { binary: true });
         }
         ws.send(Protocol.encodeCharList(CharacterStore.getAll()), { binary: true });
         break;
@@ -187,6 +218,16 @@ wss.on('connection', (ws) => {
           CharacterStore.updateChest(targetCharId, items);
           console.log(`[Server] Chest saved for char "${targetCharId}" (${items.length} items)`);
         }
+        break;
+      }
+
+      case Protocol.C_SKILL_GAIN: {
+        if (!player.charId) break;
+        const { skillName, xp } = Protocol.decodeSkillGain(data);
+        const VALID_SKILLS = ['punchSkill', 'kickSkill', 'jabSkill', 'moveSkill', 'lootSkill', 'healSkill', 'eatSkill'];
+        if (!VALID_SKILLS.includes(skillName) || xp <= 0 || xp > 500) break;
+        const updatedSkills = CharacterStore.updateSkills(player.charId, { [skillName]: xp });
+        if (updatedSkills) ws.send(Protocol.encodeSkills(updatedSkills), { binary: true });
         break;
       }
 

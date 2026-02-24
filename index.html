@@ -2,15 +2,39 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>RAGEDERUE Online</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
-    canvas { display: block; }
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; touch-action: none; }
+    body { display: flex; justify-content: center; align-items: center; height: 100dvh; }
+    canvas { display: block; touch-action: none; }
+    #focus-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 9999;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      font-family: monospace;
+      color: #fff;
+      text-align: center;
+      pointer-events: none;
+    }
+    #focus-overlay.visible { display: flex; }
+    #focus-overlay p { font-size: 26px; text-shadow: 0 0 8px #000; margin-bottom: 10px; }
+    #focus-overlay small { font-size: 14px; color: #aaa; }
   </style>
 </head>
 <body>
+  <div id="focus-overlay">
+    <p>Jeu hors focus</p>
+    <small>Cliquez pour reprendre</small>
+  </div>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>

@@ -3,11 +3,19 @@
  * Server-authoritative: enemies, loot, and the world timer are all managed here.
  * When the timer expires the world resets (enemies, corpses, loot) and a new
  * cycle begins.  The room is NEVER destroyed — it stays alive even with 0 players.
+ *
+ * levelConfig fields (all optional):
+ *   containers          {Array}   [{x,y,texture}]  Container spawn positions
+ *   containerLootTable  {Array}   [{type,weight}]  Container loot weights
+ *   corpseLootTable     {Array}   [{type,weight}]  Corpse loot weights
+ *   containerItemCount  {object}  {min,max}        Items per container
+ *   corpseItemCount     {object}  {min,max}        Items per corpse
+ *   enemies             {object}  WaveSpawner config (see WaveSpawner.js)
  */
 
 const Protocol    = require('./Protocol');
 const Broadcaster = require('./Broadcaster');
-const { WaveSpawner, MAX_ENEMIES } = require('./WaveSpawner');
+const { WaveSpawner } = require('./WaveSpawner');
 
 const TICK_RATE = 20; // Hz
 const TICK_MS   = 1000 / TICK_RATE;
@@ -15,8 +23,26 @@ const TICK_MS   = 1000 / TICK_RATE;
 // ── World timer (seconds) ──────────────────────────────────────────────────
 const RUN_TIMER = 600;  // mirrors client lootTable.js
 
-// ── Container spawn definitions ────────────────────────────────────────────
-const CONTAINER_SPAWNS = [
+// ── Fallback loot tables (used if level doesn't define its own) ────────────
+const DEFAULT_CONTAINER_LOOT_TABLE = [
+  { type: 'ethereum',  weight: 15 },
+  { type: 'sushi',     weight: 30 },
+  { type: 'pizza',     weight: 20 },
+  { type: 'ice_cream', weight: 35 },
+];
+
+const DEFAULT_CORPSE_LOOT_TABLE = [
+  { type: 'ethereum',  weight: 40 },
+  { type: 'sushi',     weight: 25 },
+  { type: 'ice_cream', weight: 25 },
+  { type: 'pizza',     weight: 10 },
+];
+
+const DEFAULT_CONTAINER_ITEM_COUNT = { min: 1, max: 3 };
+const DEFAULT_CORPSE_ITEM_COUNT    = { min: 1, max: 2 };
+
+// ── Fallback container positions (used if level doesn't define its own) ────
+const DEFAULT_CONTAINER_SPAWNS = [
   { x: 420,  y: 415, texture: 'barrel' },
   { x: 780,  y: 450, texture: 'barrel' },
   { x: 1200, y: 390, texture: 'barrel' },
@@ -24,24 +50,6 @@ const CONTAINER_SPAWNS = [
   { x: 2350, y: 395, texture: 'barrel' },
   { x: 3100, y: 445, texture: 'barrel' },
 ];
-
-// ── Loot tables ────────────────────────────────────────────────────────────
-const CONTAINER_LOOT_TABLE = [
-  { type: 'ethereum',  weight: 15 },
-  { type: 'sushi',     weight: 30 },
-  { type: 'pizza',     weight: 20 },
-  { type: 'ice_cream', weight: 35 },
-];
-
-const CORPSE_LOOT_TABLE = [
-  { type: 'ethereum',  weight: 40 },
-  { type: 'sushi',     weight: 25 },
-  { type: 'ice_cream', weight: 25 },
-  { type: 'pizza',     weight: 10 },
-];
-
-const CONTAINER_ITEM_COUNT = { min: 1, max: 3 };
-const CORPSE_ITEM_COUNT    = { min: 1, max: 2 };
 
 /** Roll items from a weighted loot table. */
 function rollLoot(table, count) {
@@ -63,10 +71,18 @@ function randBetween(min, max) {
 
 class Room {
   /**
-   * @param {string} name  Room/map identifier
+   * @param {string} name        Room/map identifier
+   * @param {object} [levelCfg]  Per-level config (see top-of-file JSDoc)
    */
-  constructor(name) {
+  constructor(name, levelCfg = {}) {
     this.name = name;
+
+    // ── Per-level config (with fallbacks) ────────────────────────────────
+    this._containerSpawns    = levelCfg.containers         || DEFAULT_CONTAINER_SPAWNS;
+    this._containerLootTable = levelCfg.containerLootTable || DEFAULT_CONTAINER_LOOT_TABLE;
+    this._corpseLootTable    = levelCfg.corpseLootTable    || DEFAULT_CORPSE_LOOT_TABLE;
+    this._containerItemCount = levelCfg.containerItemCount || DEFAULT_CONTAINER_ITEM_COUNT;
+    this._corpseItemCount    = levelCfg.corpseItemCount    || DEFAULT_CORPSE_ITEM_COUNT;
 
     /** @type {Map<number, object>} playerId → player */
     this.players = new Map();
@@ -88,7 +104,7 @@ class Room {
 
     // ── Sub-systems ───────────────────────────────────────────────────────
     this.broadcaster = new Broadcaster(this.players);
-    this.wavespawner = new WaveSpawner(() => this._nextEnemyId++);
+    this.wavespawner = new WaveSpawner(() => this._nextEnemyId++, levelCfg.enemies || {});
 
     // ── Tick performance stats ────────────────────────────────────────────
     this.stats = {
@@ -99,7 +115,7 @@ class Room {
 
     this._generateContainerLoot();
     this._interval = setInterval(() => this._tick(), TICK_MS);
-    console.log(`[Room ${this.name}] Created — world timer: ${this.worldTimer}s`);
+    console.log(`[Room ${this.name}] Created — ${this._containerSpawns.length} containers, maxEnemies=${this.wavespawner.maxEnemies}, timer: ${this.worldTimer}s`);
   }
 
   // ── Player management ──────────────────────────────────────────────────
@@ -136,11 +152,12 @@ class Room {
     if (enemy.state === 'dead') return;
     const died = enemy.takeHit(damage, knockback, fromX);
     if (died) {
-      const count = randBetween(CORPSE_ITEM_COUNT.min, CORPSE_ITEM_COUNT.max);
-      enemy.lootItems = rollLoot(CORPSE_LOOT_TABLE, count);
+      const count = randBetween(this._corpseItemCount.min, this._corpseItemCount.max);
+      enemy.lootItems = rollLoot(this._corpseLootTable, count);
       this.broadcaster.broadcast(Protocol.encodeLootData(1, enemy.netId, enemy.lootItems));
     }
   }
+
   // ── Loot management ─────────────────────────────────────────────────
 
   /**
@@ -151,31 +168,26 @@ class Room {
     let lootArray = null;
 
     if (targetKind === 0) {
-      // Container
       const c = this.containerLoot.find(c => c.id === targetId);
       if (c) lootArray = c;
     } else {
-      // Corpse
       const e = this.enemies.find(e => e.netId === targetId);
       if (e && e.lootItems) lootArray = { id: e.netId, loot: e.lootItems };
     }
 
     if (!lootArray || itemIdx < 0 || itemIdx >= lootArray.loot.length) return;
 
-    // Remove the item at the given index
     lootArray.loot.splice(itemIdx, 1);
 
-    // If it was a corpse, sync back
     if (targetKind === 1) {
       const e = this.enemies.find(e => e.netId === targetId);
       if (e) e.lootItems = lootArray.loot;
     }
 
-    // Broadcast updated loot to ALL players
     this.broadcaster.broadcast(Protocol.encodeLootData(targetKind, targetId, lootArray.loot));
   }
 
-  // ── Networking proxy (public interface used by index.js) ───────────────
+  // ── Networking proxy ────────────────────────────────────────────────────
 
   broadcast(data, excludeId) { this.broadcaster.broadcast(data, excludeId); }
   recordIncoming(byteLength) { this.broadcaster.recordIncoming(byteLength); }
@@ -238,22 +250,15 @@ class Room {
   _resetWorld() {
     console.log(`[Room ${this.name}] ⏰ Timer expired — resetting world`);
 
-    // Reset timer
     this.worldTimer = RUN_TIMER;
-
-    // Clear enemies (no initial spawn — waves handle population)
     this.enemies = [];
     this._nextEnemyId = 1;
     this.wavespawner.reset();
 
-    // Regenerate container loot
     this.containerLoot = [];
     this._generateContainerLoot();
 
-    // Broadcast reset to all connected players (with new timer)
     this.broadcaster.broadcast(Protocol.encodeWorldReset(this.worldTimer));
-
-    // Send new container loot to all
     for (const c of this.containerLoot) {
       this.broadcaster.broadcast(Protocol.encodeLootData(0, c.id, c.loot));
     }
@@ -261,9 +266,8 @@ class Room {
     console.log(`[Room ${this.name}] World reset complete — ${this.enemies.length} enemies, ${this.containerLoot.length} containers`);
   }
 
-  // ── Enemy spawning ─────────────────────────────────────────────────────
+  // ── Stats ──────────────────────────────────────────────────────────────
 
-  /** Return a snapshot of room stats for monitoring. */
   getStats() {
     const b = this.broadcaster;
     const elapsed = (Date.now() - b._lastReset) / 1000 || 1;
@@ -278,12 +282,12 @@ class Room {
       playerList: Array.from(this.players.values()).map(p => ({
         id: p.id, name: p.name, x: Math.round(p.x), y: Math.round(p.y), hp: p.hp, state: p.state,
       })),
-      enemiesAlive: alive,
-      enemiesDead: dead,
-      enemiesTotal: this.enemies.length,
-      maxEnemies: MAX_ENEMIES,
-      lootItems: totalLoot,
-      worldTimer: Math.round(this.worldTimer),
+      enemiesAlive:  alive,
+      enemiesDead:   dead,
+      enemiesTotal:  this.enemies.length,
+      maxEnemies:    this.wavespawner.maxEnemies,
+      lootItems:     totalLoot,
+      worldTimer:    Math.round(this.worldTimer),
       worldTimerMax: RUN_TIMER,
       bandwidth: {
         bytesSentTotal:  b.bytesSent,
@@ -302,7 +306,6 @@ class Room {
     };
   }
 
-  /** Reset rolling stats counters. */
   resetStats() {
     this.broadcaster.resetStats();
     this.stats.tickCount   = 0;
@@ -317,9 +320,9 @@ class Room {
   // ── Container loot generation ─────────────────────────────────────────
 
   _generateContainerLoot() {
-    for (let i = 0; i < CONTAINER_SPAWNS.length; i++) {
-      const count = randBetween(CONTAINER_ITEM_COUNT.min, CONTAINER_ITEM_COUNT.max);
-      const loot = rollLoot(CONTAINER_LOOT_TABLE, count);
+    for (let i = 0; i < this._containerSpawns.length; i++) {
+      const count = randBetween(this._containerItemCount.min, this._containerItemCount.max);
+      const loot  = rollLoot(this._containerLootTable, count);
       this.containerLoot.push({ id: i, loot });
     }
     console.log(`[Room ${this.name}] Generated loot for ${this.containerLoot.length} containers`);

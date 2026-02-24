@@ -3,24 +3,47 @@
 /**
  * WaveSpawner — manages periodic enemy wave spawning and no-player scatter logic.
  * Mutates the enemies array passed by reference from Room.
+ *
+ * Config fields (all optional — fall back to defaults):
+ *   waveIntervalMs  {number}  ms between waves         (default 30 000)
+ *   waveMin         {number}  min enemies per wave      (default 1)
+ *   waveMax         {number}  max enemies per wave      (default 3)
+ *   maxEnemies      {number}  alive cap                 (default 5)
+ *   mapWidth        {number}  x bound for spawning      (default 3500)
+ *   strongChance    {number}  0-1 chance of strong foe  (default 0.25)
+ *   strongHp        {number}  HP of strong foe          (default 100)
+ *   strongSpeed     {number}  speed of strong foe       (default 70)
  */
 const ServerEnemy = require('./ServerEnemy');
 
-const WAVE_INTERVAL_MS = 30_000;
-const WAVE_MIN    = 1;
-const WAVE_MAX    = 3;
-const MAX_ENEMIES = 5;
 const LANE_TOP    = 330;
 const LANE_BOTTOM = 470;
-const EXTRACT_X   = 3500;
+
+const DEFAULTS = {
+  waveIntervalMs: 30_000,
+  waveMin:        1,
+  waveMax:        3,
+  maxEnemies:     5,
+  mapWidth:       3500,
+  strongChance:   0.25,
+  strongHp:       100,
+  strongSpeed:    70,
+};
 
 class WaveSpawner {
   /**
    * @param {() => number} getNextId  Callback returning the next unique enemy netId
+   * @param {object}       [cfg]      Per-level spawn config (see DEFAULTS above)
    */
-  constructor(getNextId) {
+  constructor(getNextId, cfg = {}) {
     this._getNextId   = getNextId;
     this._accumulator = 0;
+    this._cfg = { ...DEFAULTS, ...cfg };
+  }
+
+  /** Update spawn config at runtime (e.g. when the room config changes). */
+  setConfig(cfg) {
+    this._cfg = { ...DEFAULTS, ...cfg };
   }
 
   /**
@@ -31,8 +54,8 @@ class WaveSpawner {
    */
   tick(dtMs, enemies, players) {
     this._accumulator += dtMs;
-    if (this._accumulator >= WAVE_INTERVAL_MS) {
-      this._accumulator -= WAVE_INTERVAL_MS;
+    if (this._accumulator >= this._cfg.waveIntervalMs) {
+      this._accumulator -= this._cfg.waveIntervalMs;
       this._spawnWave(enemies, players);
     }
   }
@@ -40,14 +63,13 @@ class WaveSpawner {
   /**
    * Redistribute living enemies evenly across the level.
    * Called when no players are present to prevent clumping.
-   * @param {object[]} enemies  Room.enemies array
    */
   scatter(enemies) {
     const living = enemies.filter(e => e.state !== 'dead');
     if (living.length === 0) return;
 
     const margin = 80;
-    const totalWidth = EXTRACT_X - margin * 2;
+    const totalWidth = this._cfg.mapWidth - margin * 2;
     const spacing = totalWidth / living.length;
 
     for (let i = 0; i < living.length; i++) {
@@ -66,21 +88,25 @@ class WaveSpawner {
   /** Reset accumulator (called on world reset). */
   reset() { this._accumulator = 0; }
 
+  /** Expose maxEnemies so Room.getStats() can read it. */
+  get maxEnemies() { return this._cfg.maxEnemies; }
+
   // ── private ──────────────────────────────────────────────────────────────
 
   _spawnWave(enemies, players) {
+    const { maxEnemies, waveMin, waveMax, mapWidth, strongChance, strongHp, strongSpeed } = this._cfg;
     const alive = enemies.filter(e => e.state !== 'dead').length;
-    if (alive >= MAX_ENEMIES) return;
+    if (alive >= maxEnemies) return;
 
     let avgX;
     if (players.length > 0) {
       avgX = players.reduce((s, p) => s + p.x, 0) / players.length;
     } else {
-      avgX = 60 + Math.random() * (EXTRACT_X - 180);
+      avgX = 60 + Math.random() * (mapWidth - 180);
     }
 
-    const budget = MAX_ENEMIES - alive;
-    const count = Math.min(budget, WAVE_MIN + Math.floor(Math.random() * (WAVE_MAX - WAVE_MIN + 1)));
+    const budget = maxEnemies - alive;
+    const count = Math.min(budget, waveMin + Math.floor(Math.random() * (waveMax - waveMin + 1)));
 
     for (let i = 0; i < count; i++) {
       let sx;
@@ -89,14 +115,14 @@ class WaveSpawner {
           ? avgX - 780 - Math.floor(Math.random() * 80)
           : avgX + 960 + 300 + Math.floor(Math.random() * 80);
       } else {
-        sx = 60 + Math.floor(Math.random() * (EXTRACT_X - 180));
+        sx = 60 + Math.floor(Math.random() * (mapWidth - 180));
       }
-      sx = Math.max(60, Math.min(EXTRACT_X - 120, sx));
+      sx = Math.max(60, Math.min(mapWidth - 120, sx));
       const sy  = LANE_TOP + 10 + Math.floor(Math.random() * (LANE_BOTTOM - LANE_TOP - 20));
-      const cfg = Math.random() < 0.25 ? { hp: 100, speed: 70 } : {};
+      const cfg = Math.random() < strongChance ? { hp: strongHp, speed: strongSpeed } : {};
       enemies.push(new ServerEnemy(this._getNextId(), sx, sy, cfg));
     }
   }
 }
 
-module.exports = { WaveSpawner, MAX_ENEMIES };
+module.exports = { WaveSpawner };

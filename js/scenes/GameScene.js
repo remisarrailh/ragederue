@@ -1,13 +1,12 @@
 import Player          from '../entities/Player.js';
-import Enemy           from '../entities/Enemy.js';
 import RemoteEnemy     from '../entities/RemoteEnemy.js';
 import CombatSystem    from '../systems/CombatSystem.js';
 import LootSystem      from '../systems/LootSystem.js';
 import Inventory       from '../systems/Inventory.js';
 import NetworkManager  from '../network/NetworkManager.js';
-import { GAME_W, GAME_H, LANE_TOP, LANE_BOTTOM } from '../config/constants.js';
+import { GAME_W, GAME_H, LANE_TOP, LANE_BOTTOM, IS_MOBILE } from '../config/constants.js';
 import { RUN_TIMER }   from '../config/lootTable.js';
-import { LEVELS, LEVEL_MAP } from '../config/levels.js';
+import { LEVELS } from '../config/levels.js';
 
 import WorldBuilder    from './game/WorldBuilder.js';
 import InputController from './game/InputController.js';
@@ -42,19 +41,33 @@ export default class GameScene extends Phaser.Scene {
     this.laneBottom = this._levelConfig.laneBottom ?? LANE_BOTTOM;
 
     // ── Network ───────────────────────────────────────────────────────────
-    this.net           = new NetworkManager();
-    this.remotePlayers = new Map();
-    if (!this._levelConfig.isPlanque) {
-      this.net.autoConnect('Player');
+    // Reuse the existing connection if we're warping between levels
+    // (avoids disconnect/reconnect on zone change, especially on remote servers)
+    const params   = new URLSearchParams(window.location.search);
+    const server   = params.get('server') || 'localhost';
+    const port     = params.get('port')   || '9000';
+    const ssl      = params.get('ssl') === 'true' || window.location.protocol === 'https:';
+    const protocol = ssl ? 'wss' : 'ws';
+    const playerName = params.get('name') || 'Player';
+    const roomName   = params.get('room') || 'street_01';
+    const charId     = this.registry.get('charId') || '';
+
+    // La room = l'id du niveau (level_01, level_03…) sauf si ?room= est forcé en URL
+    const levelRoomName = params.get('room') || this._levelConfig.id || roomName;
+
+    const existingNet = this.registry.get('sharedNet');
+    if (existingNet && existingNet.connected) {
+      // Reuse the open connection — joinRoom will be sent after netHandlers.setup()
+      this.net = existingNet;
+      this._netOwner = false;
     } else {
-      // En planque, connexion raw (sans C_JOIN) pour pouvoir sauvegarder le coffre
-      const params   = new URLSearchParams(window.location.search);
-      const server   = params.get('server') || 'localhost';
-      const port     = params.get('port')   || '9000';
-      const ssl      = params.get('ssl') === 'true' || window.location.protocol === 'https:';
-      const protocol = ssl ? 'wss' : 'ws';
-      this.net.connectRaw(`${protocol}://${server}:${port}`);
+      this.net = new NetworkManager();
+      this._netOwner = true;
+      this.registry.set('sharedNet', this.net);
+      const url = `${protocol}://${server}:${port}`;
+      this.net.connect(url, playerName, levelRoomName, charId);
     }
+    this.remotePlayers = new Map();
 
     // ── World ─────────────────────────────────────────────────────────────
     this.world = new WorldBuilder(this);
@@ -64,6 +77,13 @@ export default class GameScene extends Phaser.Scene {
     this.netHandlers = new NetworkHandlers(this);
     this.netHandlers.setup();
 
+    // ── (Re-)join room after callbacks are wired ──────────────────────────
+    // For reused connections: send C_JOIN now that onWelcome etc. are registered.
+    // For fresh connections: connect() handles the JOIN internally.
+    if (!this._netOwner) {
+      this.net.joinRoom(playerName, levelRoomName, charId);
+    }
+
     // ── Combat ────────────────────────────────────────────────────────────
     this.combat = new CombatSystem(this);
     this.combat.onHit = (owner, target, damage, knockback) => {
@@ -72,7 +92,15 @@ export default class GameScene extends Phaser.Scene {
     };
 
     // ── Player ────────────────────────────────────────────────────────────
-    const spawnX = this._levelConfig.spawnX ?? 150;
+    let spawnX = this._levelConfig.spawnX ?? 150;
+    const spawnAtWarpId = (data && data.spawnAtWarpId) ?? null;
+    if (spawnAtWarpId) {
+      const destZone = (this._levelConfig.transitZones ?? []).find(z => z.id === spawnAtWarpId);
+      if (destZone) {
+        // Place the player just to the right of the destination warp to avoid re-triggering it
+        spawnX = destZone.x + (destZone.width ?? 120) + 32;
+      }
+    }
     this.player        = new Player(this, spawnX, this.laneBottom - 10, this.combat);
     // Restore wallet across level transitions (stored in registry)
     this.player.wallet = this.registry.get('playerWallet') ?? 0;
@@ -137,7 +165,7 @@ export default class GameScene extends Phaser.Scene {
     this.registry.set('sfxVol', parseFloat(localStorage.getItem('RAGEDERUE_sfx_vol') ?? '0.5'));
 
     // ── Mobile controls (touch devices only) ─────────────────────────────
-    this._mobileActive = navigator.maxTouchPoints > 0;
+    this._mobileActive = IS_MOBILE;
     if (this._mobileActive) {
       this.scene.launch('MobileControlsScene', {
         player:      this.player,
@@ -157,6 +185,11 @@ export default class GameScene extends Phaser.Scene {
     if (this._gameEnded) return;
 
     if (this._searchCooldown > 0) this._searchCooldown -= delta;
+
+    // Decrement timer locally so it runs even without server sync
+    if (!this._levelConfig.isPlanque) {
+      this.runTimer = Math.max(0, this.runTimer - delta / 1000);
+    }
 
     this.enemies = this.enemies.filter(e => e.active);
     this.player.update(this.inputCtrl.cursors, this.inputCtrl.wasd);
@@ -210,7 +243,7 @@ export default class GameScene extends Phaser.Scene {
           return this._endGame('win', '');
         }
         if (inZone.type === 'warp' && inZone.targetLevel) {
-          return this._warpToLevel(inZone.targetLevel);
+          return this._warpToLevel(inZone.targetLevel, inZone.targetWarpId ?? null);
         }
       }
     }
@@ -322,22 +355,34 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // ── Warp to another level ─────────────────────────────────────────────
-  _warpToLevel(targetLevelId) {
+  _warpToLevel(targetLevelId, targetWarpId = null) {
     if (this._gameEnded) return;
     this._gameEnded = true;
     // Persist wallet so it survives the scene restart
     this.registry.set('playerWallet', this.player.wallet ?? 0);
-    this.net.disconnect();
+    // Keep the shared net connection alive for the next scene — don't disconnect
+    // (only disconnect if we own it AND we're going to the editor, not another game level)
+    if (this._fromEditor) {
+      if (this._netOwner) this.net.disconnect();
+      this.registry.remove('sharedNet');
+    }
+    // Clear net callbacks so they don't fire during the transition gap
+    this.net.onDisconnect    = null;
+    this.net.onSnapshot      = null;
+    this.net.onEnemySnapshot = null;
+    this.net.onTimerSync     = null;
+    this.net.onWorldReset    = null;
+    this.net.onPlayerLeave   = null;
     for (const [, rp] of this.remotePlayers) rp.destroy();
     this.remotePlayers.clear();
-    ['HUDScene','SearchScene','HideoutChestScene','InventoryScene','PauseScene'].forEach(k => this.scene.stop(k));
+    ['HUDScene','SearchScene','HideoutChestScene','InventoryScene','PauseScene','MobileControlsScene'].forEach(k => this.scene.stop(k));
     this.player.searching = false;
     this.player.inMenu    = false;
     if (this.bgMusic) { this.bgMusic.stop(); this.bgMusic.destroy(); this.bgMusic = null; }
     if (this._fromEditor) {
       this.scene.start('LevelEditorScene');
     } else {
-      this.scene.start('GameScene', { levelId: targetLevelId });
+      this.scene.start('GameScene', { levelId: targetLevelId, spawnAtWarpId: targetWarpId });
     }
   }
 
@@ -348,10 +393,12 @@ export default class GameScene extends Phaser.Scene {
     // Clear persistent inventory/wallet so the next run starts fresh
     this.registry.remove('playerInventory');
     this.registry.remove('playerWallet');
+    // End of run — always disconnect and clear shared net
     this.net.disconnect();
+    this.registry.remove('sharedNet');
     for (const [, rp] of this.remotePlayers) rp.destroy();
     this.remotePlayers.clear();
-    ['HUDScene','SearchScene','HideoutChestScene','InventoryScene','PauseScene'].forEach(k => this.scene.stop(k));
+    ['HUDScene','SearchScene','HideoutChestScene','InventoryScene','PauseScene','MobileControlsScene'].forEach(k => this.scene.stop(k));
     this.player.searching = false;
     this.player.inMenu    = false;
     if (this.bgMusic) { this.bgMusic.stop(); this.bgMusic.destroy(); this.bgMusic = null; }
@@ -369,10 +416,11 @@ export default class GameScene extends Phaser.Scene {
     if (this._gameEnded) return;
     if (this.scene.isActive('InventoryScene')) { this.player.inInventory = false; this.scene.stop('InventoryScene'); }
     if (this.scene.isActive('SearchScene'))    { this.player.searching   = false; this.scene.stop('SearchScene'); }
-    if (this.scene.isActive('PauseScene'))     { this.player.inMenu      = false; this.scene.stop('PauseScene'); return; }
+    if (this.scene.isActive('PauseScene'))     { this.player.inMenu = false; this.input.keyboard.enabled = true; this.scene.stop('PauseScene'); return; }
     this.sound.play('sfx_menu', { volume: this.registry.get('sfxVol') ?? 0.5 });
     this.player.inMenu = true;
     this.player.setVelocity(0, 0);
+    this.input.keyboard.enabled = false;  // évite que les flèches du menu traversent vers le joueur
     this.scene.launch('PauseScene', { fromScene: 'GameScene', fromEditor: this._fromEditor });
   }
 

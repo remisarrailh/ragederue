@@ -62,6 +62,13 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.maxThirst        = PLAYER_MAX_THIRST;
     this._thirstDmgAccum  = 0;    // ms accumulées pour tick dégât soif
 
+    // ── Skills (reçus du serveur via S_SKILLS) ──────────────────────────────
+    this.skills = {
+      punchSkill: 0, kickSkill: 0, jabSkill: 0,
+      moveSkill: 0, lootSkill: 0, healSkill: 0, eatSkill: 0,
+    };
+    this._moveXPAccum = 0;  // px parcourus accumulés pour moveSkill
+
     // ── State machine ──────────────────────────────────────────────────────
     this.state        = 'idle';   // idle | walk | punch | kick | jab | jump | jump_kick | hurt
     this.isInvincible = false;
@@ -110,8 +117,14 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       const activeFrames = ACTIVE_FRAMES[anim.key];
       if (hb && activeFrames && activeFrames.includes(frame.index)) {
         const dmgMult = Phaser.Math.Clamp(this.stamina / this.maxStamina, STAMINA_DMG_MIN_MULT, 1.0);
-        const dmg = Math.max(1, Math.round(hb.dmg * dmgMult));
+        const skillMap = { player_punch: 'punchSkill', player_kick: 'kickSkill', player_jab: 'jabSkill', player_jump_kick: 'kickSkill' };
+        const skillBonus = this._skillBonus(skillMap[anim.key] ?? 'punchSkill');
+        const dmg = Math.max(1, Math.round(hb.dmg * dmgMult * skillBonus));
         this.combat.activateHitbox(this, hb.offsetX, hb.offsetY, hb.w, hb.h, dmg, hb.kb);
+        // Envoyer le gain XP au serveur
+        if (this.scene.net?.sendSkillGain) {
+          this.scene.net.sendSkillGain(skillMap[anim.key] ?? 'punchSkill', 10);
+        }
       }
     });
 
@@ -373,6 +386,19 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this._staminaRegenTimer = STAMINA_REGEN_DELAY_MS;
   }
 
+  _skillLevel(name) {
+    let xp = this.skills[name] ?? 0;
+    let lvl = 0;
+    while (xp >= Math.round(100 * Math.pow(lvl + 1, 1.5))) {
+      xp -= Math.round(100 * Math.pow(lvl + 1, 1.5));
+      lvl++;
+      if (lvl >= 50) break;
+    }
+    return lvl;
+  }
+
+  _skillBonus(name) { return 1 + this._skillLevel(name) * 0.02; }
+
   _handleMovement(cursors, wasd) {
     const left  = cursors.left.isDown  || wasd.left.isDown;
     const right = cursors.right.isDown || wasd.right.isDown;
@@ -425,7 +451,22 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     }
 
     if (this.stamina <= 0) { vx *= 0.6; vy *= 0.6; }
+
+    // Bonus vitesse (moveSkill)
+    const speedMult = this._skillBonus('moveSkill');
+    vx *= speedMult;
+    vy *= speedMult;
+
     this.setVelocity(vx, vy);
+
+    // XP de déplacement : 1 XP par 200px parcourus
+    const dt = this.scene.game.loop.delta;
+    const dist = Math.sqrt(vx * vx + vy * vy) * (dt / 1000);
+    this._moveXPAccum += dist;
+    if (this._moveXPAccum >= 200) {
+      this._moveXPAccum -= 200;
+      if (this.scene.net?.sendSkillGain) this.scene.net.sendSkillGain('moveSkill', 1);
+    }
     this.y = Phaser.Math.Clamp(this.y, this.scene.laneTop ?? LANE_TOP, this.scene.laneBottom ?? LANE_BOTTOM);
 
     if (vx < 0)      { this.setFlipX(true);  this.facing = -1; }

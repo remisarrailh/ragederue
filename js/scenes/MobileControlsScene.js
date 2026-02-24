@@ -63,9 +63,9 @@ export default class MobileControlsScene extends Phaser.Scene {
     this._joyOrigin  = { x: JOY_X, y: JOY_Y };
     this._joyVec     = { x: 0, y: 0 };
 
-    // Outer ring
+    // Outer ring (non-interactive — les events sont gérés globalement)
     this._joyRing = this.add.circle(JOY_X, JOY_Y, JOY_R, 0xffffff, 0.12)
-      .setDepth(2000).setScrollFactor(0).setInteractive();
+      .setDepth(2000).setScrollFactor(0);
     this.add.circle(JOY_X, JOY_Y, JOY_R, 0x000000, 0)
       .setStrokeStyle(2, 0xffffff, ALPHA_IDLE)
       .setDepth(2001).setScrollFactor(0);
@@ -111,15 +111,15 @@ export default class MobileControlsScene extends Phaser.Scene {
     this._btnObjs.inventory = { circle: vBt, def: BTN_INVENTORY };
     this._setupButton(vBt, 'inventory', BTN_INVENTORY.color);
 
-    // ── Joystick touch zone (left half of screen) ─────────────────────────
-    // Invisible zone covering the whole left half to catch joystick drags
-    const zone = this.add.zone(0, 0, GAME_W / 2, GAME_H)
-      .setOrigin(0, 0).setDepth(1999).setScrollFactor(0).setInteractive();
-
-    zone.on('pointerdown', (ptr) => this._joyStart(ptr));
-    zone.on('pointermove', (ptr) => this._joyMove(ptr));
-    zone.on('pointerup',   (ptr) => this._joyEnd(ptr));
-    zone.on('pointerout',  (ptr) => this._joyEnd(ptr));
+    // ── Joystick — events globaux input (capte le drag même hors zone) ───────
+    // pointerdown sur la moitié gauche du canvas → démarre le joystick
+    this.input.on('pointerdown', (ptr) => {
+      if (ptr.x < GAME_W / 2) this._joyStart(ptr);
+    });
+    // pointermove global → déplace le knob (même si le doigt sort de la zone)
+    this.input.on('pointermove', (ptr) => this._joyMove(ptr));
+    // pointerup global → relâche
+    this.input.on('pointerup', (ptr) => this._joyEnd(ptr));
 
     // Init player mobile input state
     if (this._player) {

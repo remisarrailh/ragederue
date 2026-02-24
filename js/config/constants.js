@@ -1,3 +1,10 @@
+// ─── Mobile detection ─────────────────────────────────────────────────────
+// Vrai mobile/tablette = pointeur tactile grossier SANS souris précise.
+// Évite les faux-positifs sur PC hybrides (Surface, laptop avec écran tactile)
+// qui ont `maxTouchPoints > 0` mais aussi une souris `pointer:fine`.
+export const IS_MOBILE = window.matchMedia('(pointer:coarse)').matches
+                      && !window.matchMedia('(hover:hover)').matches;
+
 // ─── World dimensions ─────────────────────────────────────────────────────
 export const GAME_W       = 960;
 export const GAME_H       = 540;
@@ -53,6 +60,9 @@ export const ENEMY_ATTACK_DIST  = 70;
 export const ENEMY_KNOCKDOWN_THRESHOLD  = 35;   // accumulated dmg before knockdown
 export const ENEMY_HITSTUN_MS           = 220;  // brief flinch duration
 export const ENEMY_KNOCKDOWN_RECOVERY_MS = 900; // time on ground before getting up
+// ─── Spawn ────────────────────────────────────────────────────────────────
+export const SPAWN_LEVEL        = 'level_03';  // niveau de départ après sélection du perso
+
 // ─── Debug ────────────────────────────────────────────────────────────────
 export const DEBUG_HITBOXES     = false;
 export const DEBUG_DEPTH        = false;

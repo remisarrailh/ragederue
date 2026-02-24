@@ -69,16 +69,24 @@ export default class Inventory {
    * @returns {boolean}
    */
   useItem(item, player) {
-    if (!item.def.useTime && !item.def.healAmount && !item.def.value) return false;
+    if (!item.def.useTime && !item.def.healAmount && !item.def.value
+      && !item.def.hungerRestore && !item.def.thirstRestore) return false;
 
     if (item.def.healAmount > 0) {
-      player.hp = Math.min(player.maxHp, player.hp + item.def.healAmount);
+      const bonus  = player._skillBonus?.('healSkill') ?? 1;
+      const healed = Math.round(item.def.healAmount * bonus);
+      player.hp = Math.min(player.maxHp, player.hp + healed);
+      if (player.scene?.net?.sendSkillGain) player.scene.net.sendSkillGain('healSkill', healed);
     }
     if (item.def.hungerRestore > 0) {
-      player.hunger = Math.min(player.maxHunger, player.hunger + item.def.hungerRestore);
+      const bonus = player._skillBonus?.('eatSkill') ?? 1;
+      player.hunger = Math.min(player.maxHunger, player.hunger + Math.round(item.def.hungerRestore * bonus));
+      if (player.scene?.net?.sendSkillGain) player.scene.net.sendSkillGain('eatSkill', 5);
     }
     if (item.def.thirstRestore > 0) {
-      player.thirst = Math.min(player.maxThirst, player.thirst + item.def.thirstRestore);
+      const bonus = player._skillBonus?.('eatSkill') ?? 1;
+      player.thirst = Math.min(player.maxThirst, player.thirst + Math.round(item.def.thirstRestore * bonus));
+      if (player.scene?.net?.sendSkillGain) player.scene.net.sendSkillGain('eatSkill', 5);
     }
     if (item.def.value > 0) {
       player.wallet = (player.wallet ?? 0) + item.def.value;

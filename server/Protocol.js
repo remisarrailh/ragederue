@@ -14,6 +14,7 @@ const C_CHAR_LIST     = 0x10;  // C→S : demande liste des personnages
 const C_CHAR_SELECT   = 0x11;  // C→S : sélectionne (action=0) ou crée (action=1) un personnage
 const C_CHAR_DELETE   = 0x12;  // C→S : supprime un personnage
 const C_CHEST_SAVE    = 0x13;  // C→S : sauvegarde le contenu du coffre
+const C_SKILL_GAIN    = 0x14;  // C→S : XP gagné pour une compétence
 
 const S_WELCOME       = 0x80;
 const S_ROOM_SNAPSHOT = 0x81;
@@ -27,6 +28,7 @@ const S_TIMER_SYNC     = 0x88;
 const S_CHAR_LIST      = 0x90;  // S→C : liste des personnages
 const S_JOIN_REFUSED   = 0x91;  // S→C : personnage déjà en jeu
 const S_CHEST_DATA     = 0x92;  // S→C : contenu du coffre du personnage sélectionné
+const S_SKILLS         = 0x93;  // S→C : état complet des compétences du personnage
 
 // ─── Item types (shared with client) ────────────────────────────────────────
 const ITEM_TYPES = ['ethereum', 'sushi', 'pizza', 'ice_cream'];
@@ -56,7 +58,10 @@ function decodeJoin(buf) {
   off += nameLen;
   const roomLen = buf[off++];
   const room = buf.slice(off, off + roomLen).toString('utf8');
-  return { name, room };
+  off += roomLen;
+  const charIdLen = off < buf.length ? buf[off++] : 0;
+  const charId = charIdLen > 0 ? buf.slice(off, off + charIdLen).toString('utf8') : null;
+  return { name, room, charId };
 }
 
 function decodePlayerState(buf, offset = 1) {
@@ -293,18 +298,49 @@ function encodeChestData(items) {
   return buf;
 }
 
+// ─── Skills messages ────────────────────────────────────────────────────────
+
+/**
+ * C_SKILL_GAIN: type(1) + skillNameLen(u8) + skillName(N) + xpGain(u16 BE)
+ */
+function decodeSkillGain(buf) {
+  const nameLen   = buf[1];
+  const skillName = buf.slice(2, 2 + nameLen).toString('utf8');
+  const xp        = buf.readUInt16BE(2 + nameLen);
+  return { skillName, xp };
+}
+
+/**
+ * S_SKILLS: type(1) + count(u8) + [nameLen(u8)+name + xpTotal(u32 BE)]*count
+ */
+function encodeSkills(skills) {
+  const entries = Object.entries(skills);
+  const parts   = entries.map(([k, v]) => ({ kb: Buffer.from(k, 'utf8'), xp: v }));
+  const size    = 2 + parts.reduce((s, p) => s + 1 + p.kb.length + 4, 0);
+  const buf     = Buffer.alloc(size);
+  buf[0] = S_SKILLS;
+  buf[1] = entries.length;
+  let off = 2;
+  for (const { kb, xp } of parts) {
+    buf[off++] = kb.length;
+    kb.copy(buf, off); off += kb.length;
+    buf.writeUInt32BE(xp >>> 0, off); off += 4;
+  }
+  return buf;
+}
+
 // ─── Exports ────────────────────────────────────────────────────────────────
 module.exports = {
   C_JOIN, C_PLAYER_STATE, C_ATTACK, C_CHANGE_MAP, C_HIT_ENEMY, C_TAKE_ITEM,
-  C_CHAR_LIST, C_CHAR_SELECT, C_CHAR_DELETE, C_CHEST_SAVE,
+  C_CHAR_LIST, C_CHAR_SELECT, C_CHAR_DELETE, C_CHEST_SAVE, C_SKILL_GAIN,
   S_WELCOME, S_ROOM_SNAPSHOT, S_PLAYER_JOIN, S_PLAYER_LEAVE, S_DAMAGE,
   S_ENEMY_SNAPSHOT, S_LOOT_DATA, S_WORLD_RESET, S_TIMER_SYNC,
-  S_CHAR_LIST, S_JOIN_REFUSED, S_CHEST_DATA,
+  S_CHAR_LIST, S_JOIN_REFUSED, S_CHEST_DATA, S_SKILLS,
   STATES, stateToIdx, ENEMY_STATES, enemyStateToIdx,
   ITEM_TYPES, itemTypeToIdx,
   decodeJoin, decodePlayerState, decodeHitEnemy, decodeTakeItem,
-  decodeCharSelect, decodeCharDelete, decodeChestSave,
+  decodeCharSelect, decodeCharDelete, decodeChestSave, decodeSkillGain,
   encodeWelcome, encodeRoomSnapshot, encodePlayerJoin, encodePlayerLeave,
   encodeEnemySnapshot, encodeLootData, encodeWorldReset, encodeTimerSync,
-  encodeCharList, encodeJoinRefused, encodeChestData,
+  encodeCharList, encodeJoinRefused, encodeChestData, encodeSkills,
 };

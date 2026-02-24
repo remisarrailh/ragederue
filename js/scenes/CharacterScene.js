@@ -1,4 +1,4 @@
-import { GAME_W, GAME_H } from '../config/constants.js';
+import { GAME_W, GAME_H, SPAWN_LEVEL } from '../config/constants.js';
 import NetworkManager     from '../network/NetworkManager.js';
 
 /**
@@ -12,11 +12,11 @@ import NetworkManager     from '../network/NetworkManager.js';
  * and GameScene is started.
  *
  * Controls (list state):
- *   UP / DOWN    — navigate list
- *   ENTER / A    — play with selected character
- *   N            — new character (enter create state)
- *   DEL / Y      — delete selected character
- *   ESC / B      — back to TitleScene
+ *   UP / DOWN / scroll / click/tap  — navigate list
+ *   ENTER / A / button JOUER        — play with selected character
+ *   N / button NOUVEAU              — new character (enter create state)
+ *   DEL / Y / button SUPPR.         — delete selected character
+ *   ESC / B / button RETOUR         — back to TitleScene
  *
  * Controls (create state):
  *   Type letters  — build name
@@ -26,12 +26,12 @@ import NetworkManager     from '../network/NetworkManager.js';
  */
 
 const BOX_W = 420;
-const BOX_H = 340;
+const BOX_H = 300;
 const BOX_X = (GAME_W - BOX_W) / 2;
-const BOX_Y = (GAME_H - BOX_H) / 2 - 20;
+const BOX_Y = (GAME_H - BOX_H) / 2 - 40;
 
 const ROW_H      = 30;
-const LIST_START = BOX_Y + 80;
+const LIST_START = BOX_Y + 72;
 const MAX_VIS    = 7;
 
 export default class CharacterScene extends Phaser.Scene {
@@ -50,44 +50,57 @@ export default class CharacterScene extends Phaser.Scene {
     this._rowObjs    = [];
 
     // ── Background box ────────────────────────────────────────────────────
-    this.add.rectangle(GAME_W / 2, GAME_H / 2 - 20, BOX_W + 8, BOX_H + 8, 0x111122, 0.97)
+    this.add.rectangle(GAME_W / 2, BOX_Y + BOX_H / 2, BOX_W + 8, BOX_H + 8, 0x111122, 0.97)
       .setStrokeStyle(2, 0x5555aa, 0.8);
 
     // ── Title ─────────────────────────────────────────────────────────────
-    this.add.text(GAME_W / 2, BOX_Y + 20, 'SÉLECTION PERSONNAGE', {
+    this.add.text(GAME_W / 2, BOX_Y + 18, 'SÉLECTION PERSONNAGE', {
       fontFamily: 'monospace', fontSize: '18px', color: '#ff6600',
       stroke: '#000', strokeThickness: 4,
     }).setOrigin(0.5);
 
     // ── Status / error line ───────────────────────────────────────────────
-    this._statusText = this.add.text(GAME_W / 2, BOX_Y + 48, 'Connexion au serveur…', {
+    this._statusText = this.add.text(GAME_W / 2, BOX_Y + 44, 'Connexion au serveur…', {
       fontFamily: 'monospace', fontSize: '11px', color: '#777799',
     }).setOrigin(0.5);
 
     // ── Create-mode input row ─────────────────────────────────────────────
-    this._createLabel = this.add.text(BOX_X + 14, BOX_Y + BOX_H - 54, 'Nom : ', {
+    this._createLabel = this.add.text(BOX_X + 14, BOX_Y + BOX_H - 22, 'Nom : ', {
       fontFamily: 'monospace', fontSize: '13px', color: '#ffcc00',
     }).setOrigin(0, 0.5).setVisible(false);
 
-    this._createInput = this.add.text(BOX_X + 80, BOX_Y + BOX_H - 54, '', {
+    this._createInput = this.add.text(BOX_X + 80, BOX_Y + BOX_H - 22, '', {
       fontFamily: 'monospace', fontSize: '13px', color: '#ffffff',
     }).setOrigin(0, 0.5).setVisible(false);
 
     // Blinking cursor
-    this._createCursor = this.add.text(BOX_X + 80, BOX_Y + BOX_H - 54, '|', {
+    this._createCursor = this.add.text(BOX_X + 80, BOX_Y + BOX_H - 22, '|', {
       fontFamily: 'monospace', fontSize: '13px', color: '#ffcc00',
     }).setOrigin(0, 0.5).setVisible(false);
     this.tweens.add({ targets: this._createCursor, alpha: 0, duration: 400, yoyo: true, repeat: -1 });
-
-    // ── Hint line ─────────────────────────────────────────────────────────
-    this._hintText = this.add.text(GAME_W / 2, BOX_Y + BOX_H - 20, '', {
-      fontFamily: 'monospace', fontSize: '9px', color: '#444466',
-    }).setOrigin(0.5);
 
     // ── Selection cursor rect ─────────────────────────────────────────────
     this._cursor = this.add.rectangle(GAME_W / 2, 0, BOX_W - 20, ROW_H - 3)
       .setStrokeStyle(2, 0xffffff, 0.85).setFillStyle(0xffffff, 0.05).setVisible(false);
     this.tweens.add({ targets: this._cursor, alpha: 0.5, duration: 400, yoyo: true, repeat: -1 });
+
+    // ── Action buttons (always visible) ──────────────────────────────────
+    const BY   = BOX_Y + BOX_H + 28;
+    const bw   = 90, bh = 38, gap = 10;
+    const totalW = 4 * bw + 3 * gap;
+    const bx0  = (GAME_W - totalW) / 2 + bw / 2;
+
+    this._btnPlay   = this._makeBtn(bx0,              BY, bw, bh, 'JOUER',   0x226622, () => this._action('confirm'));
+    this._btnNew    = this._makeBtn(bx0 + bw + gap,   BY, bw, bh, 'NOUVEAU', 0x224488, () => this._enterCreate());
+    this._btnDel    = this._makeBtn(bx0 + 2*(bw+gap), BY, bw, bh, 'SUPPR.',  0x882222, () => this._action('delete'));
+    this._btnBack   = this._makeBtn(bx0 + 3*(bw+gap), BY, bw, bh, 'RETOUR',  0x444444, () => this._back());
+
+    // Create-mode buttons (hidden until create mode)
+    const cx = GAME_W / 2;
+    this._btnConfirm = this._makeBtn(cx - 75, BY, 130, bh, 'CONFIRMER', 0x226622, () => this._confirmCreate());
+    this._btnCancel  = this._makeBtn(cx + 75, BY, 110, bh, 'ANNULER',   0x444444, () => this._exitCreate());
+    this._btnConfirm.setVisible(false);
+    this._btnCancel.setVisible(false);
 
     // ── Keyboard input ────────────────────────────────────────────────────
     this.input.keyboard.on('keydown', (e) => this._onKey(e));
@@ -98,6 +111,18 @@ export default class CharacterScene extends Phaser.Scene {
       if (button.index === 0) this._action('confirm');
       if (button.index === 1) this._action('back');
       if (button.index === 3) this._action('delete');
+    });
+
+    // ── Swipe zone on list ────────────────────────────────────────────────
+    this._swipeStartY = null;
+    const swipeZone = this.add.zone(GAME_W / 2, BOX_Y + BOX_H / 2, BOX_W, BOX_H)
+      .setInteractive();
+    swipeZone.on('pointerdown', (ptr) => { this._swipeStartY = ptr.y; });
+    swipeZone.on('pointerup', (ptr) => {
+      if (this._swipeStartY === null) return;
+      const dy = ptr.y - this._swipeStartY;
+      if (Math.abs(dy) > 20) this._moveSel(dy < 0 ? -1 : 1);
+      this._swipeStartY = null;
     });
 
     // ── Connect to server ─────────────────────────────────────────────────
@@ -124,8 +149,7 @@ export default class CharacterScene extends Phaser.Scene {
     }
 
     // Gamepad navigation
-    const gp = this.registry.get('inputMode') === 'gp';
-    if (gp && this.input.gamepad.total > 0 && this._gpCooldown <= 0) {
+    if (this.input.gamepad.total > 0 && this._gpCooldown <= 0) {
       const pad = this.input.gamepad.getPad(0);
       if (pad) {
         const DEAD = 0.4;
@@ -134,14 +158,30 @@ export default class CharacterScene extends Phaser.Scene {
       }
     }
 
-    // Update hint
+    // Hint text
     if (this._mode === 'list') {
-      this._hintText.setText('ENTER: jouer   N: nouveau   DEL: supprimer   ESC: retour');
+      this._statusText.setText('ENTER: jouer   N: nouveau   DEL: supprimer   ESC: retour').setColor('#444466');
     } else if (this._mode === 'create') {
-      this._hintText.setText('ENTER: confirmer   ESC: annuler');
-    } else {
-      this._hintText.setText('');
+      this._statusText.setText('ENTER: confirmer   ESC: annuler').setColor('#444466');
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Button factory
+  // ─────────────────────────────────────────────────────────────────────────
+
+  _makeBtn(x, y, w, h, label, color, cb) {
+    const bg = this.add.rectangle(x, y, w, h, color, 0.85)
+      .setInteractive({ useHandCursor: true })
+      .setStrokeStyle(2, 0xffffff, 0.3);
+    this.add.text(x, y, label, {
+      fontFamily: 'monospace', fontSize: '12px', color: '#ffffff',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5);
+    bg.on('pointerdown', () => { bg.setFillStyle(color, 1); cb(); });
+    bg.on('pointerup',   () => bg.setFillStyle(color, 0.85));
+    bg.on('pointerout',  () => bg.setFillStyle(color, 0.85));
+    return bg;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -149,8 +189,6 @@ export default class CharacterScene extends Phaser.Scene {
   // ─────────────────────────────────────────────────────────────────────────
 
   _onKey(e) {
-    this.registry.set('inputMode', 'kb');
-
     if (this._mode === 'list') {
       if (e.key === 'ArrowUp')   { this._moveSel(-1); return; }
       if (e.key === 'ArrowDown') { this._moveSel(1);  return; }
@@ -161,14 +199,13 @@ export default class CharacterScene extends Phaser.Scene {
     }
 
     if (this._mode === 'create') {
-      if (e.key === 'Escape')     { this._exitCreate(); return; }
-      if (e.key === 'Enter')      { this._confirmCreate(); return; }
-      if (e.key === 'Backspace')  {
+      if (e.key === 'Escape')    { this._exitCreate(); return; }
+      if (e.key === 'Enter')     { this._confirmCreate(); return; }
+      if (e.key === 'Backspace') {
         this._inputBuf = this._inputBuf.slice(0, -1);
         this._refreshCreateInput();
         return;
       }
-      // Accept printable characters (max 20 chars)
       if (e.key.length === 1 && this._inputBuf.length < 20) {
         this._inputBuf += e.key;
         this._refreshCreateInput();
@@ -178,7 +215,7 @@ export default class CharacterScene extends Phaser.Scene {
 
   _action(act) {
     if (act === 'confirm' && this._mode === 'list') this._selectChar();
-    if (act === 'back')    { this._back(); }
+    if (act === 'back')                              this._back();
     if (act === 'delete'  && this._mode === 'list') this._deleteChar();
   }
 
@@ -217,17 +254,35 @@ export default class CharacterScene extends Phaser.Scene {
     const char = this._chars[this._selIdx];
     if (!char) return;
     this._net.sendCharDelete(char.id);
-    // Server will respond with updated list via onCharList
   }
 
   _enterCreate() {
-    this._mode      = 'create';
-    this._inputBuf  = '';
+    this._mode     = 'create';
+    this._inputBuf = '';
     this._refreshCreateInput();
     this._createLabel.setVisible(true);
     this._createInput.setVisible(true);
     this._createCursor.setVisible(true);
     this._cursor.setVisible(false);
+
+    // Swap button sets
+    this._btnPlay.setVisible(false);
+    this._btnNew.setVisible(false);
+    this._btnDel.setVisible(false);
+    this._btnBack.setVisible(false);
+    this._btnConfirm.setVisible(true);
+    this._btnCancel.setVisible(true);
+
+    // Open virtual keyboard (mobile) via a hidden input
+    this._fakeInput = document.createElement('input');
+    this._fakeInput.style.cssText = 'position:fixed;opacity:0;top:0;left:0;width:1px;height:1px;';
+    document.body.appendChild(this._fakeInput);
+    this._fakeInput.focus();
+    this._fakeInput.addEventListener('input', () => {
+      this._inputBuf = this._fakeInput.value.slice(0, 20);
+      this._refreshCreateInput();
+    });
+
     this._redraw();
   }
 
@@ -236,6 +291,16 @@ export default class CharacterScene extends Phaser.Scene {
     this._createLabel.setVisible(false);
     this._createInput.setVisible(false);
     this._createCursor.setVisible(false);
+
+    // Restore button sets
+    this._btnPlay.setVisible(true);
+    this._btnNew.setVisible(true);
+    this._btnDel.setVisible(true);
+    this._btnBack.setVisible(true);
+    this._btnConfirm.setVisible(false);
+    this._btnCancel.setVisible(false);
+
+    if (this._fakeInput) { this._fakeInput.remove(); this._fakeInput = null; }
     this._redraw();
   }
 
@@ -251,7 +316,6 @@ export default class CharacterScene extends Phaser.Scene {
 
   _refreshCreateInput() {
     this._createInput.setText(this._inputBuf);
-    // Reposition cursor after the text
     this._createCursor.setX(this._createInput.x + this._createInput.width + 2);
   }
 
@@ -267,15 +331,10 @@ export default class CharacterScene extends Phaser.Scene {
   _onCharList(chars) {
     this._chars = chars;
     if (this._mode === 'waiting') {
-      // C_CHAR_SELECT(0) succeeded → enter game
       const char = chars.find(c => c.id === this._pendingCharId) ??
                    chars[this._selIdx] ?? chars[0];
-      if (char) {
-        this._enterGame(char);
-        return;
-      }
+      if (char) { this._enterGame(char); return; }
     }
-    // Clamp selection
     this._selIdx = Phaser.Math.Clamp(this._selIdx, 0, Math.max(0, chars.length - 1));
     this._updateScroll();
     this._mode = 'list';
@@ -296,10 +355,8 @@ export default class CharacterScene extends Phaser.Scene {
   _enterGame(char) {
     this.registry.set('charId',   char.id);
     this.registry.set('charName', char.name);
-    // Disconnect raw connection — GameScene will open its own
     this._net.disconnect();
-    // Start in planque
-    this.scene.start('GameScene', { levelId: 'level_03' });
+    this.scene.start('GameScene', { levelId: SPAWN_LEVEL });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -324,7 +381,7 @@ export default class CharacterScene extends Phaser.Scene {
     this._rowObjs = [];
 
     if (this._chars.length === 0 && this._mode !== 'create') {
-      const empty = this.add.text(GAME_W / 2, LIST_START + ROW_H, 'Aucun personnage — appuyez N pour créer', {
+      const empty = this.add.text(GAME_W / 2, LIST_START + ROW_H, 'Aucun personnage — appuyez NOUVEAU pour créer', {
         fontFamily: 'monospace', fontSize: '11px', color: '#444466',
       }).setOrigin(0.5);
       this._rowObjs.push(empty);
@@ -340,12 +397,23 @@ export default class CharacterScene extends Phaser.Scene {
 
       const bg = this.add.rectangle(GAME_W / 2, ry, BOX_W - 20, ROW_H - 3,
         isSelected ? 0x223355 : 0x1a1a2a, isSelected ? 0.9 : 0.5,
-      ).setStrokeStyle(1, 0x334466, 0.4);
+      ).setStrokeStyle(1, 0x334466, 0.4).setInteractive({ useHandCursor: true });
 
       const name = this.add.text(BOX_X + 20, ry, char.name, {
         fontFamily: 'monospace', fontSize: '13px',
         color: isSelected ? '#ffffff' : '#aaaacc',
       }).setOrigin(0, 0.5);
+
+      // Click / tap on a row: first press = select, second = play
+      bg.on('pointerdown', () => {
+        if (this._selIdx === absI && this._mode === 'list') {
+          this._selectChar();
+        } else {
+          this._selIdx = absI;
+          this._updateScroll();
+          this._redraw();
+        }
+      });
 
       this._rowObjs.push(bg, name);
     });
@@ -364,7 +432,7 @@ export default class CharacterScene extends Phaser.Scene {
       this._rowObjs.push(dn);
     }
 
-    // Position cursor
+    // Position selection cursor
     if (this._mode === 'list' && this._chars.length > 0) {
       const visIdx = this._selIdx - this._scroll;
       this._cursor.setY(LIST_START + visIdx * ROW_H).setVisible(true);

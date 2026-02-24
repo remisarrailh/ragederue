@@ -175,38 +175,15 @@
     <div class="card">
       <h2>🖥 Server</h2>
       <div class="stat-row"><span class="stat-label">Uptime</span><span id="uptime" class="stat-value">-</span></div>
-      <div class="stat-row"><span class="stat-label">WebSocket clients</span><span id="connections" class="stat-value">-</span></div>
+      <div class="stat-row"><span class="stat-label">WS connections</span><span id="connections" class="stat-value">-</span></div>
+      <div class="stat-row"><span class="stat-label">Players in room</span><span id="playersInRoom" class="stat-value green">-</span></div>
       <div class="stat-row"><span class="stat-label">RAM (RSS)</span><span id="memRss" class="stat-value">-</span></div>
       <div class="stat-row"><span class="stat-label">Heap used / total</span><span id="memHeap" class="stat-value">-</span></div>
       <div class="stat-row"><span class="stat-label">CPU user</span><span id="cpuUser" class="stat-value">-</span></div>
       <div class="stat-row"><span class="stat-label">CPU system</span><span id="cpuSys" class="stat-value">-</span></div>
     </div>
 
-    <!-- World -->
-    <div class="card">
-      <h2>🌍 World</h2>
-      <div class="stat-row"><span class="stat-label">Room</span><span id="roomName" class="stat-value">-</span></div>
-      <div class="stat-row"><span class="stat-label">Timer</span><span id="worldTimer" class="stat-value blue">-</span></div>
-      <div class="bar-bg">
-        <div id="timerBar" class="bar-fill" style="width:0%; background: #42a5f5;"></div>
-        <span id="timerBarText" class="bar-text"></span>
-      </div>
-      <div class="stat-row"><span class="stat-label">Loot items in world</span><span id="lootItems" class="stat-value yellow">-</span></div>
-    </div>
-
-    <!-- Enemies -->
-    <div class="card">
-      <h2>👾 Enemies</h2>
-      <div class="stat-row"><span class="stat-label">Alive</span><span id="enemAlive" class="stat-value green">-</span></div>
-      <div class="stat-row"><span class="stat-label">Dead (corpses)</span><span id="enemDead" class="stat-value red">-</span></div>
-      <div class="stat-row"><span class="stat-label">Total entities</span><span id="enemTotal" class="stat-value">-</span></div>
-      <div class="bar-bg">
-        <div id="enemBar" class="bar-fill" style="width:0%; background: linear-gradient(90deg, #4caf50, #f44336);"></div>
-        <span id="enemBarText" class="bar-text"></span>
-      </div>
-    </div>
-
-    <!-- Tick Perf -->
+    <!-- Tick Perf (global, first room) -->
     <div class="card">
       <h2>⚡ Tick Performance</h2>
       <div class="stat-row"><span class="stat-label">Tick rate</span><span id="tickRate" class="stat-value">-</span></div>
@@ -219,23 +196,19 @@
       </div>
     </div>
 
-    <!-- Bandwidth -->
+    <!-- Bandwidth (global, first room) -->
     <div class="card">
-      <h2>📡 Network (Out)</h2>
+      <h2>📡 Network (Out / In)</h2>
       <div class="stat-row"><span class="stat-label">Bytes/sec sent</span><span id="bwSentSec" class="stat-value blue">-</span></div>
       <div class="stat-row"><span class="stat-label">Msgs/sec sent</span><span id="msgSentSec" class="stat-value">-</span></div>
       <div class="stat-row"><span class="stat-label">Total sent</span><span id="bwSentTotal" class="stat-value">-</span></div>
+      <div class="stat-row"><span class="stat-label">Bytes/sec recv</span><span id="bwRecvSec" class="stat-value blue">-</span></div>
+      <div class="stat-row"><span class="stat-label">Msgs/sec recv</span><span id="msgRecvSec" class="stat-value">-</span></div>
+      <div class="stat-row"><span class="stat-label">Total recv</span><span id="bwRecvTotal" class="stat-value">-</span></div>
       <div class="graph-container">
         <canvas id="bwOutGraph"></canvas>
         <div class="graph-label">KB/s sent (history)</div>
       </div>
-    </div>
-
-    <div class="card">
-      <h2>📡 Network (In)</h2>
-      <div class="stat-row"><span class="stat-label">Bytes/sec recv</span><span id="bwRecvSec" class="stat-value blue">-</span></div>
-      <div class="stat-row"><span class="stat-label">Msgs/sec recv</span><span id="msgRecvSec" class="stat-value">-</span></div>
-      <div class="stat-row"><span class="stat-label">Total recv</span><span id="bwRecvTotal" class="stat-value">-</span></div>
       <div class="graph-container">
         <canvas id="bwInGraph"></canvas>
         <div class="graph-label">KB/s recv (history)</div>
@@ -243,12 +216,15 @@
     </div>
   </div>
 
-  <!-- Players -->
+  <!-- Per-room dynamic section -->
+  <div id="roomsSection"></div>
+
+  <!-- Players (all rooms) -->
   <div class="card" style="margin-bottom: 20px;">
     <h2>👤 Players</h2>
     <div id="playersCount" style="font-size: 0.85em; color: #888; margin-bottom: 6px;">0 connected</div>
     <table class="player-table">
-      <thead><tr><th>ID</th><th>Name</th><th>X</th><th>Y</th><th>HP</th><th>State</th></tr></thead>
+      <thead><tr><th>Room</th><th>ID</th><th>Name</th><th>X</th><th>Y</th><th>HP</th><th>State</th></tr></thead>
       <tbody id="playersBody"></tbody>
     </table>
   </div>
@@ -326,68 +302,122 @@ function formatTimer(sec) {
 }
 
 function render(data) {
-  // Server
+  // ── Server stats ──────────────────────────────────────────────────────────
   document.getElementById('uptime').textContent = formatUptime(data.uptime);
   document.getElementById('connections').textContent = data.connections;
+  document.getElementById('playersInRoom').textContent = data.playersInRoom ?? 0;
   document.getElementById('memRss').textContent = data.memory.rss + ' MB';
   document.getElementById('memHeap').textContent = data.memory.heapUsed + ' / ' + data.memory.heapTotal + ' MB';
   document.getElementById('cpuUser').textContent = data.cpu.user + ' ms';
   document.getElementById('cpuSys').textContent = data.cpu.system + ' ms';
 
-  const room = data.rooms[0]; // main room
-  if (!room) return;
+  const rooms = data.rooms || [];
+  const firstRoom = rooms[0];
 
-  // World
-  document.getElementById('roomName').textContent = room.room;
-  document.getElementById('worldTimer').textContent = formatTimer(room.worldTimer);
-  const timerPct = (room.worldTimer / room.worldTimerMax) * 100;
-  document.getElementById('timerBar').style.width = timerPct + '%';
-  document.getElementById('timerBar').style.background = timerPct < 15 ? '#f44336' : timerPct < 30 ? '#ff9800' : '#42a5f5';
-  document.getElementById('timerBarText').textContent = formatTimer(room.worldTimer) + ' / ' + formatTimer(room.worldTimerMax);
-  document.getElementById('lootItems').textContent = room.lootItems;
+  // ── Tick perf + bandwidth (from first room) ───────────────────────────────
+  if (firstRoom) {
+    document.getElementById('tickRate').textContent = firstRoom.tick.rate + ' Hz';
+    const avgEl = document.getElementById('tickAvg');
+    avgEl.textContent = firstRoom.tick.avgMs + ' ms';
+    avgEl.className = 'stat-value ' + (firstRoom.tick.avgMs < 5 ? 'green' : firstRoom.tick.avgMs < 20 ? 'yellow' : 'red');
+    const maxEl = document.getElementById('tickMax');
+    maxEl.textContent = firstRoom.tick.maxMs + ' ms';
+    maxEl.className = 'stat-value ' + (firstRoom.tick.maxMs < 10 ? 'green' : firstRoom.tick.maxMs < 40 ? 'yellow' : 'red');
+    document.getElementById('tickCount').textContent = firstRoom.tick.count.toLocaleString();
 
-  // Enemies
-  document.getElementById('enemAlive').textContent = room.enemiesAlive;
-  document.getElementById('enemDead').textContent = room.enemiesDead;
-  document.getElementById('enemTotal').textContent = room.enemiesTotal;
-  const enemPct = (room.enemiesAlive / room.maxEnemies) * 100;
-  document.getElementById('enemBar').style.width = enemPct + '%';
-  document.getElementById('enemBarText').textContent = room.enemiesAlive + ' / ' + room.maxEnemies + ' alive';
+    // Sum bandwidth across all rooms
+    let bwSentSec = 0, bwRecvSec = 0, bwSentTotal = 0, bwRecvTotal = 0, msgSentSec = 0, msgRecvSec = 0;
+    for (const r of rooms) {
+      bwSentSec   += r.bandwidth.bytesSentPerSec;
+      bwRecvSec   += r.bandwidth.bytesRecvPerSec;
+      bwSentTotal += r.bandwidth.bytesSentTotal;
+      bwRecvTotal += r.bandwidth.bytesRecvTotal;
+      msgSentSec  += r.bandwidth.msgsSentPerSec;
+      msgRecvSec  += r.bandwidth.msgsRecvPerSec;
+    }
+    document.getElementById('bwSentSec').textContent = formatBytes(bwSentSec) + '/s';
+    document.getElementById('msgSentSec').textContent = msgSentSec + ' msg/s';
+    document.getElementById('bwSentTotal').textContent = formatBytes(bwSentTotal);
+    document.getElementById('bwRecvSec').textContent = formatBytes(bwRecvSec) + '/s';
+    document.getElementById('msgRecvSec').textContent = msgRecvSec + ' msg/s';
+    document.getElementById('bwRecvTotal').textContent = formatBytes(bwRecvTotal);
 
-  // Tick perf
-  document.getElementById('tickRate').textContent = room.tick.rate + ' Hz';
-  const avgEl = document.getElementById('tickAvg');
-  avgEl.textContent = room.tick.avgMs + ' ms';
-  avgEl.className = 'stat-value ' + (room.tick.avgMs < 5 ? 'green' : room.tick.avgMs < 20 ? 'yellow' : 'red');
-  const maxEl = document.getElementById('tickMax');
-  maxEl.textContent = room.tick.maxMs + ' ms';
-  maxEl.className = 'stat-value ' + (room.tick.maxMs < 10 ? 'green' : room.tick.maxMs < 40 ? 'yellow' : 'red');
-  document.getElementById('tickCount').textContent = room.tick.count.toLocaleString();
+    tickHistory.push(firstRoom.tick.avgMs); tickHistory.shift();
+    bwOutHistory.push(bwSentSec / 1024); bwOutHistory.shift();
+    bwInHistory.push(bwRecvSec / 1024);  bwInHistory.shift();
 
-  // Bandwidth
-  document.getElementById('bwSentSec').textContent = formatBytes(room.bandwidth.bytesSentPerSec) + '/s';
-  document.getElementById('msgSentSec').textContent = room.bandwidth.msgsSentPerSec + ' msg/s';
-  document.getElementById('bwSentTotal').textContent = formatBytes(room.bandwidth.bytesSentTotal);
-  document.getElementById('bwRecvSec').textContent = formatBytes(room.bandwidth.bytesRecvPerSec) + '/s';
-  document.getElementById('msgRecvSec').textContent = room.bandwidth.msgsRecvPerSec + ' msg/s';
-  document.getElementById('bwRecvTotal').textContent = formatBytes(room.bandwidth.bytesRecvTotal);
+    drawGraph('tickGraph',  tickHistory,  '#4caf50', 50);
+    drawGraph('bwOutGraph', bwOutHistory, '#42a5f5');
+    drawGraph('bwInGraph',  bwInHistory,  '#ff9800');
+  }
 
-  // History graphs
-  tickHistory.push(room.tick.avgMs); tickHistory.shift();
-  bwOutHistory.push(room.bandwidth.bytesSentPerSec / 1024); bwOutHistory.shift();
-  bwInHistory.push(room.bandwidth.bytesRecvPerSec / 1024); bwInHistory.shift();
+  // ── Per-room cards ────────────────────────────────────────────────────────
+  const section = document.getElementById('roomsSection');
+  section.innerHTML = '';
 
-  drawGraph('tickGraph', tickHistory, '#4caf50', 50);
-  drawGraph('bwOutGraph', bwOutHistory, '#42a5f5');
-  drawGraph('bwInGraph', bwInHistory, '#ff9800');
+  for (const room of rooms) {
+    const timerPct = (room.worldTimer / room.worldTimerMax) * 100;
+    const timerColor = timerPct < 15 ? '#f44336' : timerPct < 30 ? '#ff9800' : '#42a5f5';
+    const enemPct = room.maxEnemies > 0 ? (room.enemiesAlive / room.maxEnemies) * 100 : 0;
+    const aliveColor = room.enemiesAlive === 0 ? '#4caf50' :
+                       room.enemiesAlive >= room.maxEnemies ? '#f44336' : '#ffeb3b';
 
-  // Players
-  document.getElementById('playersCount').textContent = room.players + ' connected';
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.marginBottom = '16px';
+    card.innerHTML = `
+      <h2>🌍 ${room.room}
+        <span style="font-size:0.7em;font-weight:normal;color:#888;margin-left:8px;">
+          ${room.players} joueur${room.players !== 1 ? 's' : ''}
+        </span>
+      </h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;">
+
+        <div>
+          <div class="stat-row"><span class="stat-label">Timer</span>
+            <span class="stat-value" style="color:${timerColor}">${formatTimer(room.worldTimer)} / ${formatTimer(room.worldTimerMax)}</span>
+          </div>
+          <div class="bar-bg" style="margin-bottom:8px;">
+            <div class="bar-fill" style="width:${timerPct}%;background:${timerColor};"></div>
+            <span class="bar-text">${formatTimer(room.worldTimer)}</span>
+          </div>
+          <div class="stat-row"><span class="stat-label">Loot en monde</span>
+            <span class="stat-value yellow">${room.lootItems}</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="stat-row"><span class="stat-label">Ennemis vivants</span>
+            <span class="stat-value" style="color:${aliveColor}">${room.enemiesAlive} / ${room.maxEnemies}</span>
+          </div>
+          <div class="bar-bg" style="margin-bottom:8px;">
+            <div class="bar-fill" style="width:${enemPct}%;background:linear-gradient(90deg,#4caf50,#f44336);"></div>
+            <span class="bar-text">${room.enemiesAlive} vivants · ${room.enemiesDead} morts</span>
+          </div>
+          <div class="stat-row"><span class="stat-label">Total entités</span>
+            <span class="stat-value">${room.enemiesTotal}</span>
+          </div>
+        </div>
+
+      </div>`;
+    section.appendChild(card);
+  }
+
+  // ── Players table (all rooms) ─────────────────────────────────────────────
+  const totalPlayers = rooms.reduce((s, r) => s + r.players, 0);
+  document.getElementById('playersCount').textContent = totalPlayers + ' connecté' + (totalPlayers !== 1 ? 's' : '');
   const tbody = document.getElementById('playersBody');
   tbody.innerHTML = '';
-  for (const p of room.playerList) {
+  for (const room of rooms) {
+    for (const p of room.playerList) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td style="color:#888">${esc(room.room)}</td><td>${p.id}</td><td>${esc(p.name)}</td><td>${p.x}</td><td>${p.y}</td><td>${p.hp}</td><td>${p.state}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
+  if (totalPlayers === 0) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${p.id}</td><td>${esc(p.name)}</td><td>${p.x}</td><td>${p.y}</td><td>${p.hp}</td><td>${p.state}</td>`;
+    tr.innerHTML = `<td colspan="7" style="color:#444;text-align:center;padding:8px">Aucun joueur connecté</td>`;
     tbody.appendChild(tr);
   }
 }

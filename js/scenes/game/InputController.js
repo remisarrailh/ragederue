@@ -38,11 +38,13 @@ export default class InputController {
 
     // ── Keyboard event listeners ─────────────────────────────────────────
     scene.input.keyboard.on('keydown-E', () => {
+      if (scene.player?.searching || scene.player?.inMenu) return;
       scene.registry.set('inputMode', 'kb');
       onInteract();
     });
     scene.input.keyboard.on('keydown-TAB', (e) => {
       e.preventDefault();
+      if (scene.player?.inMenu) return;
       scene.registry.set('inputMode', 'kb');
       onInventory();
     });
@@ -61,7 +63,10 @@ export default class InputController {
       if (chosenPad < 0) return;
       if (pad.index !== chosenPad) return;
       scene.registry.set('inputMode', 'gp');
-      if (scene.player.searching || scene.player.inMenu) return;
+      if (scene.player.searching || scene.player.inMenu || scene.player.inInventory) return;
+      // Guard: don't reopen inventory if it was just closed this frame
+      const closedAt = scene.registry.get('inventoryClosedAt') ?? 0;
+      if (button.index === 8 && Date.now() - closedAt < 200) return;
       if (button.index === 9) onSettings();   // Start
       if (button.index === 3) onInteract();   // Y / Triangle
       if (button.index === 8) onInventory();  // Select

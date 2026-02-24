@@ -20,6 +20,7 @@ export const C_CHAR_LIST     = 0x10;  // Request character list
 export const C_CHAR_SELECT   = 0x11;  // Select (action=0) or create (action=1) a character
 export const C_CHAR_DELETE   = 0x12;  // Delete a character
 export const C_CHEST_SAVE    = 0x13;  // Save chest contents to server
+export const C_SKILL_GAIN    = 0x14;  // Notify server of XP gain for a skill
 
 // Server → Client
 export const S_WELCOME       = 0x80;
@@ -34,6 +35,7 @@ export const S_TIMER_SYNC     = 0x88;
 export const S_CHAR_LIST      = 0x90;  // Character list response
 export const S_JOIN_REFUSED   = 0x91;  // Character already in-game
 export const S_CHEST_DATA     = 0x92;  // Chest contents after character selection
+export const S_SKILLS         = 0x93;  // Full skill state for the selected character
 
 // ─── Item types (shared with server) ────────────────────────────────────────
 export const ITEM_TYPES = ['ethereum', 'sushi', 'pizza', 'ice_cream'];
@@ -56,12 +58,13 @@ ENEMY_STATES.forEach((s, i) => { enemyStateToIdx[s] = i; });
 // ─── Encode helpers ─────────────────────────────────────────────────────────
 
 /**
- * C_JOIN: type(1) + nameLen(1) + name(N) + roomLen(1) + room(M)
+ * C_JOIN: type(1) + nameLen(1) + name(N) + roomLen(1) + room(M) + charIdLen(1) + charId(K)
  */
-export function encodeJoin(name, room) {
-  const nameBytes = new TextEncoder().encode(name);
-  const roomBytes = new TextEncoder().encode(room);
-  const buf = new ArrayBuffer(1 + 1 + nameBytes.length + 1 + roomBytes.length);
+export function encodeJoin(name, room, charId = '') {
+  const nameBytes   = new TextEncoder().encode(name);
+  const roomBytes   = new TextEncoder().encode(room);
+  const charIdBytes = new TextEncoder().encode(charId);
+  const buf = new ArrayBuffer(1 + 1 + nameBytes.length + 1 + roomBytes.length + 1 + charIdBytes.length);
   const view = new DataView(buf);
   const u8 = new Uint8Array(buf);
   let off = 0;
@@ -69,7 +72,9 @@ export function encodeJoin(name, room) {
   view.setUint8(off++, nameBytes.length);
   u8.set(nameBytes, off); off += nameBytes.length;
   view.setUint8(off++, roomBytes.length);
-  u8.set(roomBytes, off);
+  u8.set(roomBytes, off); off += roomBytes.length;
+  view.setUint8(off++, charIdBytes.length);
+  u8.set(charIdBytes, off);
   return buf;
 }
 
@@ -363,6 +368,33 @@ export function encodeChestSave(charId, items) {
     buf.set(b, off); off += b.length;
   }
   return buf;
+}
+
+/** C_SKILL_GAIN: type(1) + skillNameLen(u8) + skillName(N) + xpGain(u16 BE) */
+export function encodeSkillGain(skillName, xp) {
+  const nb  = new TextEncoder().encode(skillName);
+  const buf = new Uint8Array(1 + 1 + nb.length + 2);
+  buf[0] = C_SKILL_GAIN;
+  buf[1] = nb.length;
+  buf.set(nb, 2);
+  const dv = new DataView(buf.buffer);
+  dv.setUint16(2 + nb.length, xp, false); // big-endian
+  return buf;
+}
+
+/** S_SKILLS: type(1) + count(u8) + [nameLen(u8)+name + xpTotal(u32 BE)]* */
+export function decodeSkills(buf) {
+  const dv    = new DataView(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
+  const u8    = new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
+  const count = dv.getUint8(1);
+  const skills = {};
+  let off = 2;
+  for (let i = 0; i < count; i++) {
+    const nLen = dv.getUint8(off++);
+    const name = new TextDecoder().decode(u8.slice(off, off + nLen)); off += nLen;
+    skills[name] = dv.getUint32(off, false); off += 4;
+  }
+  return skills;
 }
 
 /** S_CHEST_DATA: type(1) + count(u8) + [itemLen(u8) + item(N)]* */

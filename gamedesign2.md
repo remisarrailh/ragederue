@@ -1,14 +1,37 @@
 # Correctif
 
+* Joueur dans la planque n'est pas synchro (il faut que le déplacement des joueurs soit synchro)
+* Retirer la limite du coffre
+* Image des objets dans le coffre plutôt que texte
+* Coffre commun à tous les joueurs
+* Tri des objets par type (soin/argent etc...)
 
 
-# Compatibilité
 
-Jouable sur un téléphone / tablette ?
+# Warp
+
+* Un warp doit redirigé vers un autre warp d'un autre niveau , pas un niveau 
+* mécanique à l'air partiellement implémenté mais pas claire (nommé zone\_xxxxxx au lieu du nom donné à la warp+niveau)
+* Elle n'a pas l'air de fonctionné
+
+
+
+
+
+# Compatibilité mobile
+
+* Optimiser version mobile (mal positionner / pas sur tout l'écran)
+* Menu end game non géré
+* Inventaire ne marche pas sur mobile
+* Contrôle trop petit sur mobile
+
+
 
 # Planque:
 
-* Ultérieurement il y aurait des améliorations de la planque qui nécessite des objets spécifiques
+* Gérer les améliorations
+
+
 
 # Amélioration de la planque
 
@@ -20,19 +43,11 @@ Jouable sur un téléphone / tablette ?
 
 
 
+Les améliorations demandent des objets (vis/clous/tuyaux/etc...) et peuvent avoir 1 à 3 niveau
+
+
+
 # Points d'expériences
-
-Un système d'expérience permet d'améliorer ces capacités / persistant sur le serveur!
-
-Donner des coups de points : + de points d'endurance / + dégats poings
-
-Donner des coups de pieds : + de points d'endurance / + de dégats pieds
-
-Sauter / Se déplacer : Bonus vitesse / Bonus endurance
-
-Looter : Vitesse de loots
-
-Se soigner : Bonus soin
 
 
 
@@ -46,6 +61,15 @@ Se soigner : Bonus soin
 
 
 
+# Ennemis
+
+* Ajouter des nouveaux types d'ennemis
+* Ajouter des boss à des positions semi aléatoire (position fixe possible multiples)
+
+
+
+
+
 # Quêtes
 
 * Des objectifs seront à faire dans le jeu, cela peut être
@@ -53,21 +77,23 @@ Se soigner : Bonus soin
 * Récupérer X objets et les ramener à la planque
 * Tuer un ennemi spéciale
 * Poser un objet dans une zone
+* Quêtes avec mini jeu (un joueur doit faire un mini jeu et les autres le défendre
+
+
 
 # Jeu
 
 * Les zones de collisions sont incorrectes (trop grande) ajouter une hitbox visible dans l'éditeur de niveau pour checker ça
-* Un warp doit redirigé vers un autre warp d'un autre niveau , pas un niveau (si on rentre par une porte il faut qu'on puisse ressortir par la même porte
+* Par exemple l'objet ne doit pas avoir une hitbox trop basique, sinon on ne peut pas passer au dessus et au dessous
+* Possibilité de revive un joueur qui est à terre
+* Possibilité de se soigner entre joueur
 
 
 
 # Serveur
 
-* Chaque level à sa génération des loots / ennemis
-* Possibilités de paramétrer la fréquence d'apparition des ennemis - quantité par ennemis
-* Au démarrage un joueur doit créer un personnage (quand il relance le jeu, il est automatiquement sélectionné.
-
-
+* Chaque level à sa génération des loots / ennemis (nombre défini par apport au conteneurs et nombre d'ennemis et type d'ennemis
+* Possibilités de paramétrer la fréquence d'apparition des ennemis - quantité par ennemis par niveau
 
 # Editeur de niveau
 
@@ -87,15 +113,11 @@ Container dans Props (container est maintenant un attribut / type de container c
 
 # Editeur de loots tables
 
-Editeur de loots
+
+
+# Editeur de loots
 
 * Permet d'ajouter/supprimer des loots du jeu
-
-Impossible de changer le nom d'un item et ces attributs
-
-Impossible de changer la texture d'un item
-
-Save dans la loot editor ne ramène pas à l'éditeur de niveau
-
-
-
+* Impossible de changer le nom d'un item et ces attributs
+* Impossible de changer la texture d'un item
+* Save dans la loot editor ne ramène pas à l'éditeur de niveau

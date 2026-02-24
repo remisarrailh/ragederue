@@ -4,11 +4,59 @@
       "id": "char_1771879955369",
       "name": "remi",
       "chestItems": [
-        "sushi",
+        "ethereum",
+        "ethereum",
         "pizza",
-        "ice_cream"
+        "ethereum",
+        "ethereum",
+        "ethereum",
+        "ice_cream",
+        "ice_cream",
+        "ethereum",
+        "ethereum",
+        "ethereum",
+        "ethereum",
+        "ice_cream",
+        "ethereum",
+        "pizza",
+        "pizza",
+        "pizza",
+        "sushi",
+        "sushi",
+        "ice_cream",
+        "ethereum",
+        "ice_cream",
+        "ethereum",
+        "ethereum",
+        "pizza",
+        "ethereum",
+        "ethereum",
+        "ethereum",
+        "ethereum",
+        "ethereum"
       ],
-      "createdAt": 1771879955369
+      "createdAt": 1771879955369,
+      "skills": {
+        "moveSkill": 387,
+        "punchSkill": 2390,
+        "kickSkill": 1350,
+        "lootSkill": 240,
+        "healSkill": 343,
+        "eatSkill": 110,
+        "jabSkill": 920
+      }
+    },
+    {
+      "id": "char_1771921793221",
+      "name": "tseT",
+      "chestItems": [],
+      "createdAt": 1771921793221,
+      "skills": {
+        "moveSkill": 20,
+        "jabSkill": 10,
+        "kickSkill": 20,
+        "punchSkill": 160
+      }
     }
   ]
 }

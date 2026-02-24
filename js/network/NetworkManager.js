@@ -7,6 +7,7 @@ import {
   encodeCharSelect,
   encodeCharDelete,
   encodeChestSave,
+  encodeSkillGain,
   getMsgType,
   decodeWelcome,
   decodeRoomSnapshot,
@@ -18,6 +19,7 @@ import {
   decodeCharList,
   decodeJoinRefused,
   decodeChestData,
+  decodeSkills,
   S_WELCOME,
   S_ROOM_SNAPSHOT,
   S_PLAYER_JOIN,
@@ -29,6 +31,7 @@ import {
   S_CHAR_LIST,
   S_JOIN_REFUSED,
   S_CHEST_DATA,
+  S_SKILLS,
 } from './NetProtocol.js';
 
 
@@ -63,13 +66,26 @@ export default class NetworkManager {
     this.onWorldReset    = null;  // (remainingTime) => {}
     this.onTimerSync     = null;  // (remainingTime) => {}
     this.onDisconnect    = null;  // () => {}
+    this.onReconnect     = null;  // () => void — called when reconnection succeeds
     this.onCharList      = null;  // (characters[]) => {}
     this.onJoinRefused   = null;  // (reason: string) => {}
     this.onChestData     = null;  // (items: string[]) => {}
+    this.onSkills        = null;  // (skills: {skillName: totalXP}) => {}
 
     // ── Rate limiter ──────────────────────────────────────────────────────
     this._sendInterval = 50;  // ms (20 Hz)
     this._lastSendTime = 0;
+
+    // ── Reconnect state ───────────────────────────────────────────────────
+    this._reconnectUrl     = null;   // last URL used by connect() or connectRaw()
+    this._reconnectName    = null;   // player name for C_JOIN
+    this._reconnectRoom    = null;   // room name for C_JOIN
+    this._reconnectCharId  = '';     // charId sent in C_JOIN
+    this._reconnectRaw     = false;  // true if last connect was connectRaw
+    this._reconnectTimer   = null;   // setTimeout handle
+    this._reconnectAttempt = 0;
+    this._reconnectMax     = 10;     // give up after 10 attempts
+    this._reconnecting     = false;
   }
 
   /**
@@ -96,6 +112,14 @@ export default class NetworkManager {
    * Used by CharacterScene to browse characters before entering a room.
    */
   connectRaw(url) {
+    this._reconnectUrl  = url;
+    this._reconnectRaw  = true;
+    this._reconnecting  = false;
+    this._reconnectAttempt = 0;
+    this._openRaw(url);
+  }
+
+  _openRaw(url) {
     console.log(`[Net] Connecting (raw) to ${url}...`);
     this.ws = new WebSocket(url);
     this.ws.binaryType = 'arraybuffer';
@@ -103,15 +127,20 @@ export default class NetworkManager {
     this.ws.onopen = () => {
       console.log('[Net] Connected (raw)');
       this.connected = true;
+      this._reconnectAttempt = 0;
+      this._reconnecting = false;
+      if (this._reconnecting) return;
       if (this.onConnect) this.onConnect();
+      if (this.onReconnect && this._reconnectAttempt > 0) this.onReconnect();
     };
 
     this.ws.onmessage = (event) => { this._handleMessage(event.data); };
 
     this.ws.onclose = () => {
-      console.log('[Net] Disconnected');
+      console.log('[Net] Disconnected (raw)');
       this.connected = false;
       if (this.onDisconnect) this.onDisconnect();
+      // No auto-reconnect for raw connections (CharacterScene handles it)
     };
 
     this.ws.onerror = (err) => { console.warn('[Net] WebSocket error', err); };
@@ -120,16 +149,30 @@ export default class NetworkManager {
   /**
    * Connect to WebSocket server.
    */
-  connect(url, name, room) {
-    console.log(`[Net] Connecting to ${url}...`);
+  connect(url, name, room, charId = '') {
+    this._reconnectUrl    = url;
+    this._reconnectName   = name;
+    this._reconnectRoom   = room;
+    this._reconnectCharId = charId;
+    this._reconnectRaw    = false;
+    this._reconnecting    = false;
+    this._reconnectAttempt = 0;
+    this._openConnect(url, name, room, charId);
+  }
+
+  _openConnect(url, name, room, charId = '') {
+    console.log(`[Net] Connecting to ${url}${this._reconnecting ? ' (retry)' : ''}...`);
     this.ws = new WebSocket(url);
     this.ws.binaryType = 'arraybuffer';
 
     this.ws.onopen = () => {
+      const wasReconnecting = this._reconnecting;
       console.log('[Net] Connected');
       this.connected = true;
-      // Send JOIN
-      this.ws.send(encodeJoin(name, room));
+      this._reconnectAttempt = 0;
+      this._reconnecting = false;
+      this.ws.send(encodeJoin(name, room, charId));
+      if (wasReconnecting && this.onReconnect) this.onReconnect();
     };
 
     this.ws.onmessage = (event) => {
@@ -140,11 +183,32 @@ export default class NetworkManager {
       console.log('[Net] Disconnected');
       this.connected = false;
       if (this.onDisconnect) this.onDisconnect();
+      this._scheduleReconnect();
     };
 
     this.ws.onerror = (err) => {
       console.warn('[Net] WebSocket error', err);
     };
+  }
+
+  /**
+   * Attempt to reconnect after a disconnect (only for non-raw connections).
+   */
+  _scheduleReconnect() {
+    if (this._reconnectRaw) return;           // CharacterScene handles its own disconnect
+    if (this._reconnecting) return;            // already in progress
+    if (this._reconnectAttempt >= this._reconnectMax) {
+      console.warn('[Net] Max reconnect attempts reached — giving up');
+      return;
+    }
+    this._reconnecting = true;
+    this._reconnectAttempt++;
+    const delay = Math.min(1000 * this._reconnectAttempt, 8000); // 1s, 2s, ... up to 8s
+    console.log(`[Net] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempt}/${this._reconnectMax})...`);
+    this._reconnectTimer = setTimeout(() => {
+      if (!this._reconnectUrl) return;
+      this._openConnect(this._reconnectUrl, this._reconnectName, this._reconnectRoom, this._reconnectCharId ?? '');
+    }, delay);
   }
 
   /**
@@ -178,6 +242,17 @@ export default class NetworkManager {
     this.ws.send(encodeTakeItem(targetKind, targetId, itemIdx));
   }
 
+  /**
+   * (Re-)join a room on an already-open connection.
+   * Called when warping between zones so the server knows the new room.
+   */
+  joinRoom(name, room, charId = '') {
+    this._reconnectName   = name;
+    this._reconnectRoom   = room;
+    this._reconnectCharId = charId;
+    this._send(encodeJoin(name, room, charId));
+  }
+
   /** Request full character list from server. */
   sendCharListReq() { this._send(encodeCharListReq()); }
 
@@ -190,11 +265,20 @@ export default class NetworkManager {
   /** Save chest contents to server (charId included in message for raw connections). */
   sendChestSave(charId, items) { this._send(encodeChestSave(charId, items)); }
 
+  /** Notify server of XP gained for a skill. */
+  sendSkillGain(skillName, xp) { this._send(encodeSkillGain(skillName, xp)); }
+
   /**
-   * Disconnect cleanly.
+   * Disconnect cleanly (cancels any pending reconnect).
    */
   disconnect() {
+    // Cancel any scheduled reconnect
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+    this._reconnecting = false;
+    this._reconnectAttempt = 0;
+    // Suppress the onDisconnect callback that the close event would fire
     if (this.ws) {
+      this.ws.onclose = null;
       this.ws.close();
       this.ws = null;
     }
@@ -270,6 +354,11 @@ export default class NetworkManager {
       case S_CHEST_DATA: {
         const items = decodeChestData(data);
         if (this.onChestData) this.onChestData(items);
+        break;
+      }
+      case S_SKILLS: {
+        const skills = decodeSkills(data);
+        if (this.onSkills) this.onSkills(skills);
         break;
       }
       default:

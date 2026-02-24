@@ -209,7 +209,9 @@ export default class SearchScene extends Phaser.Scene {
     }
 
     const idx = this._identifyIdx;
-    this.time.delayedCall(SEARCH_IDENTIFY_MS, () => {
+    const lootLevel  = this.player?._skillLevel?.('lootSkill') ?? 0;
+    const identDelay = Math.max(100, SEARCH_IDENTIFY_MS - lootLevel * 20);
+    this.time.delayedCall(identDelay, () => {
       if (!this.scene.isActive()) return; // scene may have closed
       this._revealedItems[idx].identified = true;
       this._refreshRow(idx);
@@ -314,6 +316,9 @@ export default class SearchScene extends Phaser.Scene {
     this.inventory.addItem(item.type, item.identified);
     item.taken = true;
     this._refreshRow(this._selectedIdx);
+
+    // XP loot
+    if (this.net?.sendSkillGain) this.net.sendSkillGain('lootSkill', 5);
 
     // Notify server so all players see the item removed
     if (this.net) {

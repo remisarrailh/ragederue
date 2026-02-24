@@ -268,6 +268,15 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._btnTgtL.setVisible(false);
     this._btnTgtR.setVisible(false);
 
+    this._lblTargetWarp = this.add.text(x0 + 580, py, '', {
+      fontFamily: 'monospace', fontSize: '10px', color: '#aaaaaa',
+    }).setOrigin(0, 0.5).setDepth(700).setVisible(false);
+    this._uiLayer.add(this._lblTargetWarp);
+    this._btnWarpL = this._uiBtn(x0 + 690, py, '◄', '#ff9900', () => this._cycleTargetWarp(-1), 0.5, 0.5);
+    this._btnWarpR = this._uiBtn(x0 + 710, py, '►', '#ff9900', () => this._cycleTargetWarp(1),  0.5, 0.5);
+    this._btnWarpL.setVisible(false);
+    this._btnWarpR.setVisible(false);
+
     // ── Propriétés niveau (visibles quand rien n'est sélectionné) ────────
     this._fieldBg  = this._makeLevelField(x0,       py, 'parallax.bg',  'px.bg');
     this._fieldMid = this._makeLevelField(x0 + 90,  py, 'parallax.mid', 'px.mid');
@@ -956,6 +965,9 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._lblTarget.setVisible(false);
     this._btnTgtL.setVisible(false);
     this._btnTgtR.setVisible(false);
+    this._lblTargetWarp.setVisible(false);
+    this._btnWarpL.setVisible(false);
+    this._btnWarpR.setVisible(false);
     this._btnBgL.setVisible(false);
     this._lblBgName.setVisible(false);
     this._btnBgR.setVisible(false);
@@ -1002,6 +1014,10 @@ export default class LevelEditorScene extends Phaser.Scene {
       this._lblTarget.setText(`→ ${wo.data.targetLevel ?? '(none)'}`).setPosition(x0 + 440, py).setVisible(true);
       this._btnTgtL.setPosition(x0 + 540, py).setVisible(true);
       this._btnTgtR.setPosition(x0 + 560, py).setVisible(true);
+      const twarpLabel = wo.data.targetWarpId ?? '(none)';
+      this._lblTargetWarp.setText(`↪ ${twarpLabel}`).setPosition(x0 + 580, py).setVisible(!!wo.data.targetLevel);
+      this._btnWarpL.setPosition(x0 + 690, py).setVisible(!!wo.data.targetLevel);
+      this._btnWarpR.setPosition(x0 + 710, py).setVisible(!!wo.data.targetLevel);
     } else {
       this._showField(this._fieldScale, x0 + 180, py, 'scale', Number((wo.data.scale ?? 1.0).toFixed(2)));
       // Toggles collision uniquement pour les props
@@ -1212,6 +1228,20 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._updateListPanel();
   }
 
+  _cycleTargetWarp(dir) {
+    const wo = this._selected?.obj;
+    if (!wo || wo.type !== 'transit' || !wo.data.targetLevel) return;
+    const targetLevel = this._levels.find(l => l.id === wo.data.targetLevel);
+    if (!targetLevel) return;
+    const warps = (targetLevel.transitZones ?? []).filter(z => z.type === 'warp');
+    if (!warps.length) return;
+    const ids  = [null, ...warps.map(z => z.id)];
+    const cur  = ids.indexOf(wo.data.targetWarpId ?? null);
+    const next = Phaser.Math.Wrap(cur + dir, 0, ids.length);
+    wo.data.targetWarpId = ids[next];
+    this._updatePropsPanel();
+  }
+
   _toggleBlocksPlayer() {
     const wo = this._selected?.obj;
     if (!wo || wo.type !== 'prop') return;
@@ -1331,10 +1361,11 @@ export default class LevelEditorScene extends Phaser.Scene {
       ln.push('    ],');
       ln.push('    transitZones: [');
       for (const z of (lv.transitZones ?? [])) {
-        const tgt  = z.targetLevel ? `'${z.targetLevel}'` : 'null';
+        const tgt     = z.targetLevel  ? `'${z.targetLevel}'`  : 'null';
+        const twarpId = z.targetWarpId ? `'${z.targetWarpId}'` : 'null';
         const yStr = (z.y      != null) ? `, y: ${z.y}` : '';
         const hStr = (z.height != null) ? `, height: ${z.height}` : '';
-        ln.push(`      { id: '${z.id}', type: '${z.type}', x: ${z.x}${yStr}, width: ${z.width ?? 120}${hStr}, targetLevel: ${tgt}, label: '${z.label ?? ''}' },`);
+        ln.push(`      { id: '${z.id}', type: '${z.type}', x: ${z.x}${yStr}, width: ${z.width ?? 120}${hStr}, targetLevel: ${tgt}, targetWarpId: ${twarpId}, label: '${z.label ?? ''}' },`);
       }
       ln.push('    ],');
       ln.push('  },');

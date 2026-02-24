@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"console.log\\(''6400 seconds ='', Math.floor\\(6400 / 60\\) + '':'' + String\\(Math.floor\\(6400 % 60\\)\\).padStart\\(2, ''0''\\)\\); console.log\\(''106:40 as seconds ='', 106*60 + 40\\);\")",
+      "Bash(xargs grep -l \"isHideoutChest\")",
+      "Bash(grep -r \"containers\" server/*.js)"
+    ]
+  }
+}

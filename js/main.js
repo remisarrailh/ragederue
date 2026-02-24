@@ -7,9 +7,10 @@ import HUDScene          from './scenes/HUDScene.js';
 import PauseScene        from './scenes/PauseScene.js';
 import InventoryScene    from './scenes/InventoryScene.js';
 import SearchScene       from './scenes/SearchScene.js';
-import HideoutChestScene from './scenes/HideoutChestScene.js';
-import GameOverScene     from './scenes/GameOverScene.js';
-import WinScene          from './scenes/WinScene.js';
+import HideoutChestScene    from './scenes/HideoutChestScene.js';
+import MobileControlsScene from './scenes/MobileControlsScene.js';
+import GameOverScene        from './scenes/GameOverScene.js';
+import WinScene             from './scenes/WinScene.js';
 import { GAME_W, GAME_H } from './config/constants.js';
 
 const config = {
@@ -31,7 +32,12 @@ const config = {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
-  scene: [PreloadScene, TitleScene, CharacterScene, LevelEditorScene, GameScene, HUDScene, PauseScene, InventoryScene, SearchScene, HideoutChestScene, GameOverScene, WinScene]
+  scene: [PreloadScene, TitleScene, CharacterScene, LevelEditorScene, GameScene, HUDScene, PauseScene, InventoryScene, SearchScene, HideoutChestScene, MobileControlsScene, GameOverScene, WinScene]
 };
 
 new Phaser.Game(config);
+
+// ── Out-of-focus overlay (DOM, visible over all Phaser scenes) ────────────
+const focusOverlay = document.getElementById('focus-overlay');
+window.addEventListener('blur',  () => focusOverlay?.classList.add('visible'));
+window.addEventListener('focus', () => focusOverlay?.classList.remove('visible'));
