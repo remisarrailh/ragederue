@@ -1,4 +1,4 @@
-import { GAME_W, GAME_H } from '../config/constants.js';
+import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
 
 export default class TitleScene extends Phaser.Scene {
   constructor() {
@@ -78,13 +78,28 @@ export default class TitleScene extends Phaser.Scene {
 
     this._updateSel();
 
+    // ── Fullscreen button (mobile) ─────────────────────────────────────────
+    if (IS_MOBILE) {
+      const fsBg = this.add.rectangle(GAME_W / 2, GAME_H * 0.82, 220, 40, 0x335577, 0.85)
+        .setStrokeStyle(2, 0x88aacc, 0.6).setInteractive({ useHandCursor: true });
+      const fsLbl = this.add.text(GAME_W / 2, GAME_H * 0.82, '⛶  PLEIN ÉCRAN', {
+        fontFamily: 'monospace', fontSize: '14px', color: '#ffffff',
+        stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5);
+      fsBg.on('pointerdown', () => {
+        this.scale.startFullscreen();
+      });
+    }
+
     // ── Keyboard shortcuts hint ───────────────────────────────────────────
-    this.add.text(GAME_W / 2, GAME_H * 0.84, [
-      'ENTER ── Jouer     ESC ── Réglages     L ── Éditeur',
-    ].join('\n'), {
-      fontFamily: 'monospace', fontSize: '11px', color: '#444466',
-      align: 'center',
-    }).setOrigin(0.5);
+    if (!IS_MOBILE) {
+      this.add.text(GAME_W / 2, GAME_H * 0.84, [
+        'ENTER ── Jouer     ESC ── Réglages     L ── Éditeur',
+      ].join('\n'), {
+        fontFamily: 'monospace', fontSize: '11px', color: '#444466',
+        align: 'center',
+      }).setOrigin(0.5);
+    }
 
     // ── Keyboard input ────────────────────────────────────────────────────
     this.input.keyboard.on('keydown-ENTER',  () => this._confirmSel());

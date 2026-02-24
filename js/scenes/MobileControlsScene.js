@@ -18,18 +18,18 @@ import { GAME_W, GAME_H } from '../config/constants.js';
 
 // ── Geometry ──────────────────────────────────────────────────────────────
 
-const JOY_R   = 56;   // outer ring radius
-const JOY_KNB = 28;   // knob radius
-const JOY_X   = 90;   // centre X of joystick area (from left)
-const JOY_Y   = GAME_H - 90;  // centre Y
+const JOY_R   = 70;   // outer ring radius
+const JOY_KNB = 34;   // knob radius
+const JOY_X   = 100;  // centre X of joystick area (from left)
+const JOY_Y   = GAME_H - 100; // centre Y
 
 // Action buttons — arranged in a D-pad-like cluster bottom-right
-const BTN_R   = 28;   // button radius
-const BTN_PAD = 12;   // gap between buttons
+const BTN_R   = 36;   // button radius
+const BTN_PAD = 10;   // gap between buttons
 
 // Cluster centre-X from right edge
-const CLUST_CX = GAME_W - 100;
-const CLUST_CY = GAME_H - 90;
+const CLUST_CX = GAME_W - 110;
+const CLUST_CY = GAME_H - 100;
 
 // Individual button positions (offset from cluster centre)
 const BTNS = [
@@ -39,8 +39,8 @@ const BTNS = [
   { key: 'jump',  label: '↑',  dx:  0,        dy:  BTN_R + BTN_PAD,  color: 0x44cc44 },
 ];
 
-const BTN_INTERACT  = { key: 'interact',  label: 'E',  x: GAME_W - 180, y: GAME_H - 42, r: 20, color: 0x5588ff };
-const BTN_INVENTORY = { key: 'inventory', label: 'INV', x: GAME_W - 42,  y: 36,          r: 20, color: 0x888888 };
+const BTN_INTERACT  = { key: 'interact',  label: 'E',   x: GAME_W - 200, y: GAME_H - 42, r: 26, color: 0x5588ff };
+const BTN_INVENTORY = { key: 'inventory', label: 'INV', x: GAME_W - 42,  y: 36,          r: 24, color: 0x888888 };
 
 // ── Alpha constants ───────────────────────────────────────────────────────
 const ALPHA_IDLE  = 0.35;
@@ -49,14 +49,18 @@ const ALPHA_PRESS = 0.80;
 export default class MobileControlsScene extends Phaser.Scene {
   constructor() { super({ key: 'MobileControlsScene' }); }
 
-  // Called by GameScene: scene.launch('MobileControlsScene', { player, onInteract, onInventory })
+  // Called by GameScene: scene.launch('MobileControlsScene', { player, onInteract, onInventory, onPause })
   init(data) {
     this._player      = data.player;
     this._onInteract  = data.onInteract  ?? (() => {});
     this._onInventory = data.onInventory ?? (() => {});
+    this._onPause     = data.onPause     ?? (() => {});
   }
 
   create() {
+    // ── Enable multi-touch (joystick + buttons simultaneously) ──────────
+    this.input.addPointer(1);  // 2 pointers total (default pointer1 + pointer2)
+
     // ── Joystick ──────────────────────────────────────────────────────────
     this._joyActive  = false;
     this._joyPointerId = -1;
@@ -83,7 +87,7 @@ export default class MobileControlsScene extends Phaser.Scene {
       const circle = this.add.circle(bx, by, BTN_R, def.color, ALPHA_IDLE)
         .setDepth(2002).setScrollFactor(0).setInteractive();
       const label = this.add.text(bx, by, def.label, {
-        fontFamily: 'monospace', fontSize: '14px', color: '#ffffff',
+        fontFamily: 'monospace', fontSize: '18px', color: '#ffffff',
         stroke: '#000', strokeThickness: 3,
       }).setOrigin(0.5).setDepth(2003).setScrollFactor(0);
 
@@ -95,7 +99,7 @@ export default class MobileControlsScene extends Phaser.Scene {
     const iBt = this.add.circle(BTN_INTERACT.x, BTN_INTERACT.y, BTN_INTERACT.r, BTN_INTERACT.color, ALPHA_IDLE)
       .setDepth(2002).setScrollFactor(0).setInteractive();
     this.add.text(BTN_INTERACT.x, BTN_INTERACT.y, BTN_INTERACT.label, {
-      fontFamily: 'monospace', fontSize: '13px', color: '#ffffff',
+      fontFamily: 'monospace', fontSize: '16px', color: '#ffffff',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(2003).setScrollFactor(0);
     this._btnObjs.interact = { circle: iBt, def: BTN_INTERACT };
@@ -105,11 +109,21 @@ export default class MobileControlsScene extends Phaser.Scene {
     const vBt = this.add.circle(BTN_INVENTORY.x, BTN_INVENTORY.y, BTN_INVENTORY.r, BTN_INVENTORY.color, ALPHA_IDLE)
       .setDepth(2002).setScrollFactor(0).setInteractive();
     this.add.text(BTN_INVENTORY.x, BTN_INVENTORY.y, BTN_INVENTORY.label, {
-      fontFamily: 'monospace', fontSize: '9px', color: '#ffffff',
+      fontFamily: 'monospace', fontSize: '11px', color: '#ffffff',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(2003).setScrollFactor(0);
     this._btnObjs.inventory = { circle: vBt, def: BTN_INVENTORY };
     this._setupButton(vBt, 'inventory', BTN_INVENTORY.color);
+
+    // Pause button (top-left area, away from HUD bars)
+    const pauseBt = this.add.circle(42, 36, 20, 0x555566, ALPHA_IDLE)
+      .setDepth(2002).setScrollFactor(0).setInteractive();
+    this.add.text(42, 36, '⏸', {
+      fontFamily: 'monospace', fontSize: '14px', color: '#ffffff',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2003).setScrollFactor(0);
+    this._btnObjs.pause = { circle: pauseBt };
+    this._setupButton(pauseBt, 'pause', 0x555566);
 
     // ── Joystick — events globaux input (capte le drag même hors zone) ───────
     // pointerdown sur la moitié gauche du canvas → démarre le joystick
@@ -149,6 +163,7 @@ export default class MobileControlsScene extends Phaser.Scene {
       case 'jump':      this._player._gpAttack.jump  = true; break;
       case 'interact':  this._onInteract();  break;
       case 'inventory': this._onInventory(); break;
+      case 'pause':     this._onPause();     break;
     }
   }
 

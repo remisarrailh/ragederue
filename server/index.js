@@ -15,11 +15,15 @@ const http = require('http');
 const Room = require('./Room');
 const Protocol = require('./Protocol');
 const CharacterStore = require('./CharacterStore');
+const SharedChestStore = require('./SharedChestStore');
 const { xpToLevel } = CharacterStore;
 const { getLevelConfig } = require('./levelConfigs');
 
 // Characters currently in-game: Set of charId strings
 const activeChars = new Set();
+
+// All connected WebSocket clients (for shared chest broadcast)
+const allClients = new Set();
 
 const PORT = parseInt(process.argv[2] || '9000', 10);
 
@@ -91,6 +95,8 @@ httpServer.listen(PORT, () => {
 });
 
 wss.on('connection', (ws) => {
+  allClients.add(ws);
+
   const player = {
     id: nextId++,
     ws,
@@ -121,7 +127,13 @@ wss.on('connection', (ws) => {
         // Set charId from JOIN if provided (GameScene sends it)
         if (joinCharId && !player.charId) {
           player.charId = joinCharId;
+          activeChars.add(joinCharId);
           console.log(`[Server] charId set from JOIN: ${joinCharId}`);
+          // Notify char-selection screens that this char is now taken
+          const takenMsg = Protocol.encodeCharList(CharacterStore.getAll(), activeChars);
+          for (const client of allClients) {
+            if (client !== ws && client.readyState === client.OPEN) client.send(takenMsg, { binary: true });
+          }
         }
 
         // If already in a room (zone change on a reused connection) — leave first
@@ -146,7 +158,14 @@ wss.on('connection', (ws) => {
           ws.send(Protocol.encodeSkills(skills), { binary: true });
         }
 
-        // Notify others in the room
+        // Send existing players' names to the newcomer
+        for (const [, other] of room.players) {
+          if (other.id !== player.id) {
+            ws.send(Protocol.encodePlayerJoin(other.id, other.name), { binary: true });
+          }
+        }
+
+        // Notify others in the room of the newcomer
         room.broadcast(Protocol.encodePlayerJoin(player.id, player.name), player.id);
 
         console.log(`[Server] ${player.name} (id=${player.id}) joined room "${roomName}" (${room.players.size} players)`);
@@ -182,7 +201,7 @@ wss.on('connection', (ws) => {
       }
 
       case Protocol.C_CHAR_LIST: {
-        ws.send(Protocol.encodeCharList(CharacterStore.getAll()), { binary: true });
+        ws.send(Protocol.encodeCharList(CharacterStore.getAll(), activeChars), { binary: true });
         break;
       }
 
@@ -191,32 +210,46 @@ wss.on('connection', (ws) => {
         if (action === 1) {
           // Create new character
           if (value.trim().length > 0) CharacterStore.create(value);
+          // Broadcast updated list to all (new char visible everywhere)
+          const newCharMsg = Protocol.encodeCharList(CharacterStore.getAll(), activeChars);
+          for (const client of allClients) {
+            if (client.readyState === client.OPEN) client.send(newCharMsg, { binary: true });
+          }
         } else {
           // Select existing character
           if (activeChars.has(value)) {
             ws.send(Protocol.encodeJoinRefused('Personnage déjà en jeu'), { binary: true });
+            // Refresh the list for this client so it sees correct inGame flags
+            ws.send(Protocol.encodeCharList(CharacterStore.getAll(), activeChars), { binary: true });
             break;
           }
           player.charId = value;
           activeChars.add(value);
           console.log(`[Server] ${player.name} (id=${player.id}) selected char "${value}"`);
-          // Send chest contents to the client
-          const char = CharacterStore.getById(value);
-          if (char) ws.send(Protocol.encodeChestData(char.chestItems || []), { binary: true });
+          // Send shared chest contents to the client
+          ws.send(Protocol.encodeChestData(SharedChestStore.getItems()), { binary: true });
           // Send skill state to the client
           const skills = CharacterStore.getSkills(value) ?? {};
           ws.send(Protocol.encodeSkills(skills), { binary: true });
+          // Notify OTHER clients that this char is now taken
+          const takenMsg = Protocol.encodeCharList(CharacterStore.getAll(), activeChars);
+          for (const client of allClients) {
+            if (client !== ws && client.readyState === client.OPEN) client.send(takenMsg, { binary: true });
+          }
         }
-        ws.send(Protocol.encodeCharList(CharacterStore.getAll()), { binary: true });
         break;
       }
 
       case Protocol.C_CHEST_SAVE: {
-        const { charId: saveCharId, items } = Protocol.decodeChestSave(data);
-        const targetCharId = saveCharId || player.charId;
-        if (targetCharId) {
-          CharacterStore.updateChest(targetCharId, items);
-          console.log(`[Server] Chest saved for char "${targetCharId}" (${items.length} items)`);
+        const { items } = Protocol.decodeChestSave(data);
+        SharedChestStore.setItems(items);
+        console.log(`[Server] Shared chest saved (${items.length} items)`);
+        // Broadcast updated chest to all connected clients
+        const chestMsg = Protocol.encodeChestData(items);
+        for (const client of allClients) {
+          if (client !== ws && client.readyState === client.OPEN) {
+            client.send(chestMsg, { binary: true });
+          }
         }
         break;
       }
@@ -237,7 +270,7 @@ wss.on('connection', (ws) => {
         if (!activeChars.has(charId)) {
           CharacterStore.delete(charId);
         }
-        ws.send(Protocol.encodeCharList(CharacterStore.getAll()), { binary: true });
+        ws.send(Protocol.encodeCharList(CharacterStore.getAll(), activeChars), { binary: true });
         break;
       }
 
@@ -248,8 +281,16 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    allClients.delete(ws);
     console.log(`[Server] ${player.name} (id=${player.id}) disconnected`);
-    if (player.charId) activeChars.delete(player.charId);
+    if (player.charId) {
+      activeChars.delete(player.charId);
+      // Notify character-selection screens that this char is now available
+      const charListMsg = Protocol.encodeCharList(CharacterStore.getAll(), activeChars);
+      for (const client of allClients) {
+        if (client.readyState === client.OPEN) client.send(charListMsg, { binary: true });
+      }
+    }
     if (player.room) {
       player.room.removePlayer(player);
       // Notify others

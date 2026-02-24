@@ -1,4 +1,4 @@
-import { GAME_W } from '../config/constants.js';
+import { GAME_W, GAME_H, GAME_VERSION } from '../config/constants.js';
 
 const PAD = 14;
 const BAR_W = 160;
@@ -74,6 +74,15 @@ export default class HUDScene extends Phaser.Scene {
     this._thText = this.add.text(PAD + 22 + BAR_W + 8, PAD + 58, '', {
       fontFamily: 'monospace', fontSize: '11px', color: '#88eeff',
     }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(501);
+
+    // ── Nom du joueur + version (bas droite) ─────────────────────────────
+    const charName = this.registry.get('charName') ?? '';
+    this._versionLabel = this.add.text(GAME_W - PAD, GAME_H - PAD,
+      `${charName}  v${GAME_VERSION}`, {
+        fontFamily: 'monospace', fontSize: '10px', color: '#555566',
+        stroke: '#000000', strokeThickness: 2,
+      },
+    ).setOrigin(1, 1).setScrollFactor(0).setDepth(501);
 
     this._updateHP();
   }

@@ -49,6 +49,11 @@ export default class RemotePlayer extends Phaser.Physics.Arcade.Sprite {
     this.play('player_idle');
   }
 
+  setName(name) {
+    this.netName = name;
+    this._nameTag.setText(name);
+  }
+
   /**
    * Apply a server snapshot for this player.
    */

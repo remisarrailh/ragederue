@@ -48,6 +48,7 @@ export default class CharacterScene extends Phaser.Scene {
     this._inputBuf   = '';
     this._errorTimer = 0;
     this._rowObjs    = [];
+    this._pendingChar = null;
 
     // ── Background box ────────────────────────────────────────────────────
     this.add.rectangle(GAME_W / 2, BOX_Y + BOX_H / 2, BOX_W + 8, BOX_H + 8, 0x111122, 0.97)
@@ -129,7 +130,13 @@ export default class CharacterScene extends Phaser.Scene {
     this._net = new NetworkManager();
     this._net.onCharList    = (chars) => this._onCharList(chars);
     this._net.onJoinRefused = (reason) => this._onRefused(reason);
-    this._net.onChestData   = (items) => { this.registry.set('chestItems', items); };
+    this._net.onChestData   = (items) => {
+      this.registry.set('chestItems', items);
+      // S_CHEST_DATA is the server's confirmation that char selection succeeded
+      if (this._mode === 'waiting' && this._pendingChar) {
+        this._enterGame(this._pendingChar);
+      }
+    };
     this._net.onConnect     = () => { this._net.sendCharListReq(); };
     this._net.onDisconnect  = () => this._showStatus('Serveur non disponible', '#ff4444');
 
@@ -244,7 +251,12 @@ export default class CharacterScene extends Phaser.Scene {
     if (this._chars.length === 0) return;
     const char = this._chars[this._selIdx];
     if (!char) return;
+    if (char.inGame) {
+      this._showStatus('Personnage déjà en jeu', '#ff6644');
+      return;
+    }
     this._mode = 'waiting';
+    this._pendingChar = char;  // store the full char object
     this._showStatus('Connexion…', '#aaaacc');
     this._net.sendCharSelect(0, char.id);
   }
@@ -330,11 +342,8 @@ export default class CharacterScene extends Phaser.Scene {
 
   _onCharList(chars) {
     this._chars = chars;
-    if (this._mode === 'waiting') {
-      const char = chars.find(c => c.id === this._pendingCharId) ??
-                   chars[this._selIdx] ?? chars[0];
-      if (char) { this._enterGame(char); return; }
-    }
+    // Don't interrupt a pending selection — onChestData handles the transition
+    if (this._mode === 'waiting') return;
     this._selIdx = Phaser.Math.Clamp(this._selIdx, 0, Math.max(0, chars.length - 1));
     this._updateScroll();
     this._mode = 'list';
@@ -395,14 +404,24 @@ export default class CharacterScene extends Phaser.Scene {
       const absI = vi + this._scroll;
       const isSelected = absI === this._selIdx && this._mode === 'list';
 
+      const bgColor = char.inGame ? 0x221111 : (isSelected ? 0x223355 : 0x1a1a2a);
+      const bgAlpha = char.inGame ? 0.7      : (isSelected ? 0.9 : 0.5);
       const bg = this.add.rectangle(GAME_W / 2, ry, BOX_W - 20, ROW_H - 3,
-        isSelected ? 0x223355 : 0x1a1a2a, isSelected ? 0.9 : 0.5,
-      ).setStrokeStyle(1, 0x334466, 0.4).setInteractive({ useHandCursor: true });
+        bgColor, bgAlpha,
+      ).setStrokeStyle(1, char.inGame ? 0x663333 : 0x334466, 0.4).setInteractive({ useHandCursor: true });
 
+      const nameColor = char.inGame ? '#886666' : (isSelected ? '#ffffff' : '#aaaacc');
       const name = this.add.text(BOX_X + 20, ry, char.name, {
-        fontFamily: 'monospace', fontSize: '13px',
-        color: isSelected ? '#ffffff' : '#aaaacc',
+        fontFamily: 'monospace', fontSize: '13px', color: nameColor,
       }).setOrigin(0, 0.5);
+
+      if (char.inGame) {
+        const tag = this.add.text(BOX_X + BOX_W - 30, ry, 'EN JEU', {
+          fontFamily: 'monospace', fontSize: '10px', color: '#ff4444',
+          stroke: '#000', strokeThickness: 2,
+        }).setOrigin(1, 0.5);
+        this._rowObjs.push(tag);
+      }
 
       // Click / tap on a row: first press = select, second = play
       bg.on('pointerdown', () => {

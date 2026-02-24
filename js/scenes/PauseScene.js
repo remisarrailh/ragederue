@@ -1,4 +1,4 @@
-import { GAME_W, GAME_H } from '../config/constants.js';
+import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
 
 const SLIDER_W = 200;
 const SLIDER_H = 6;
@@ -73,11 +73,40 @@ export default class PauseScene extends Phaser.Scene {
       }).setOrigin(0.5);
     }
 
+    // ── Fullscreen toggle (mobile) ─────────────────────────────────────────
+    if (IS_MOBILE) {
+      const fsY = this._fromEditor ? GAME_H * 0.74 : GAME_H * 0.80;
+      const fsBg = this.add.rectangle(GAME_W / 2, fsY, 200, 36, 0x335577, 0.85)
+        .setStrokeStyle(2, 0x88aacc, 0.6).setInteractive({ useHandCursor: true });
+      const fsLbl = this.add.text(GAME_W / 2, fsY, '⛶  PLEIN ÉCRAN', {
+        fontFamily: 'monospace', fontSize: '13px', color: '#ffffff',
+        stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5);
+      fsBg.on('pointerdown', () => {
+        if (this.scale.isFullscreen) {
+          this.scale.stopFullscreen();
+        } else {
+          this.scale.startFullscreen();
+        }
+      });
+    }
+
+    // ── Close button (mobile) ──────────────────────────────────────────────
+    if (IS_MOBILE) {
+      const closeBg = this.add.rectangle(GAME_W / 2, GAME_H * 0.90, 160, 36, 0x882222, 0.85)
+        .setStrokeStyle(2, 0xff4444, 0.6).setInteractive({ useHandCursor: true });
+      this.add.text(GAME_W / 2, GAME_H * 0.90, 'FERMER', {
+        fontFamily: 'monospace', fontSize: '14px', color: '#ffffff',
+        stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5);
+      closeBg.on('pointerdown', () => this._resume());
+    }
+
     // ── Hint ──────────────────────────────────────────────────────────────
-    const hint = this.add.text(GAME_W / 2, GAME_H * 0.94, 'ESC / Start: fermer', {
+    const hint = this.add.text(GAME_W / 2, GAME_H * 0.94, IS_MOBILE ? '' : 'ESC / Start: fermer', {
       fontFamily: 'monospace', fontSize: '11px', color: '#888888',
     }).setOrigin(0.5);
-    this.tweens.add({ targets: hint, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
+    if (!IS_MOBILE) this.tweens.add({ targets: hint, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
 
     // ── Input ─────────────────────────────────────────────────────────────
     this.input.keyboard.on('keydown-ESC', () => this._resume());

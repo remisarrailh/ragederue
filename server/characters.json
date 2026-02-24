@@ -37,13 +37,13 @@
       ],
       "createdAt": 1771879955369,
       "skills": {
-        "moveSkill": 387,
-        "punchSkill": 2390,
-        "kickSkill": 1350,
-        "lootSkill": 240,
-        "healSkill": 343,
-        "eatSkill": 110,
-        "jabSkill": 920
+        "moveSkill": 577,
+        "punchSkill": 2930,
+        "kickSkill": 1870,
+        "lootSkill": 315,
+        "healSkill": 383,
+        "eatSkill": 120,
+        "jabSkill": 2010
       }
     },
     {
@@ -52,10 +52,10 @@
       "chestItems": [],
       "createdAt": 1771921793221,
       "skills": {
-        "moveSkill": 20,
+        "moveSkill": 61,
         "jabSkill": 10,
         "kickSkill": 20,
-        "punchSkill": 160
+        "punchSkill": 210
       }
     }
   ]

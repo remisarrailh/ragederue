@@ -3,7 +3,10 @@
     "allow": [
       "Bash(node -e \"console.log\\(''6400 seconds ='', Math.floor\\(6400 / 60\\) + '':'' + String\\(Math.floor\\(6400 % 60\\)\\).padStart\\(2, ''0''\\)\\); console.log\\(''106:40 as seconds ='', 106*60 + 40\\);\")",
       "Bash(xargs grep -l \"isHideoutChest\")",
-      "Bash(grep -r \"containers\" server/*.js)"
+      "Bash(grep -r \"containers\" server/*.js)",
+      "Bash(xargs grep -l \"isHideoutChest\\\\|isPlanque\")",
+      "Bash(grep -n \"S_CHEST_DATA\\\\|C_CHEST_SAVE\\\\|sendChestSave\" /c/Users/remi/Desktop/soronline/js/network/*.js /c/Users/remi/Desktop/soronline/server/*.js)",
+      "Bash(xargs grep -l \"craft\\\\|upgrade\\\\|combine\\\\|forge\\\\|recipe\")"
     ]
   }
 }

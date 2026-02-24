@@ -48,7 +48,7 @@ export default class GameScene extends Phaser.Scene {
     const port     = params.get('port')   || '9000';
     const ssl      = params.get('ssl') === 'true' || window.location.protocol === 'https:';
     const protocol = ssl ? 'wss' : 'ws';
-    const playerName = params.get('name') || 'Player';
+    const playerName = this.registry.get('charName') || params.get('name') || 'Player';
     const roomName   = params.get('room') || 'street_01';
     const charId     = this.registry.get('charId') || '';
 
@@ -171,6 +171,7 @@ export default class GameScene extends Phaser.Scene {
         player:      this.player,
         onInteract:  () => this._interact(),
         onInventory: () => this._openInventory(),
+        onPause:     () => this._toggleSettings(),
       });
     }
 
@@ -263,13 +264,11 @@ export default class GameScene extends Phaser.Scene {
       this._transitPrompt.setVisible(false);
     }
 
-    if (!this._levelConfig.isPlanque) {
-      this.net.sendState(
-        this.player.x, this.player.y,
-        this.player.body.velocity.x, this.player.body.velocity.y,
-        this.player.state, this.player.facing, this.player.hp,
-      );
-    }
+    this.net.sendState(
+      this.player.x, this.player.y,
+      this.player.body.velocity.x, this.player.body.velocity.y,
+      this.player.state, this.player.facing, this.player.hp,
+    );
 
     for (const [, rp] of this.remotePlayers) rp.update(time, delta);
 

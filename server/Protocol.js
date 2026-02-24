@@ -227,14 +227,15 @@ function decodeCharDelete(buf) {
 }
 
 /**
- * S_CHAR_LIST: type(1) + count(u8) + [ idLen(u8)+id + nameLen(u8)+name ]*count
+ * S_CHAR_LIST: type(1) + count(u8) + [ idLen(u8)+id + nameLen(u8)+name + inGame(u8) ]*count
  */
-function encodeCharList(characters) {
+function encodeCharList(characters, activeCharsSet) {
   const parts = characters.map(c => ({
-    idB:   Buffer.from(c.id,   'utf8'),
-    nameB: Buffer.from(c.name, 'utf8'),
+    idB:    Buffer.from(c.id,   'utf8'),
+    nameB:  Buffer.from(c.name, 'utf8'),
+    inGame: activeCharsSet && activeCharsSet.has(c.id) ? 1 : 0,
   }));
-  const size = 2 + parts.reduce((s, p) => s + 2 + p.idB.length + p.nameB.length, 0);
+  const size = 2 + parts.reduce((s, p) => s + 3 + p.idB.length + p.nameB.length, 0);
   const buf  = Buffer.alloc(size);
   buf[0] = S_CHAR_LIST;
   buf[1] = characters.length;
@@ -244,6 +245,7 @@ function encodeCharList(characters) {
     p.idB.copy(buf, off); off += p.idB.length;
     buf[off++] = p.nameB.length;
     p.nameB.copy(buf, off); off += p.nameB.length;
+    buf[off++] = p.inGame;
   }
   return buf;
 }

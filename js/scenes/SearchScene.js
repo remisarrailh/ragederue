@@ -1,4 +1,4 @@
-import { GAME_W, GAME_H } from '../config/constants.js';
+import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
 import { ITEM_DEFS, SEARCH_OPEN_MS, SEARCH_IDENTIFY_MS } from '../config/lootTable.js';
 
 /**
@@ -63,6 +63,17 @@ export default class SearchScene extends Phaser.Scene {
     this._barFill = this.add.rectangle(
       GAME_W / 2 - (BOX_W - 40) / 2, BOX_Y + 45, 0, 12, 0x33aaff
     ).setOrigin(0, 0.5);
+
+    // ── Close button (mobile) ───────────────────────────────────────────
+    if (IS_MOBILE) {
+      const closeBg = this.add.circle(BOX_X + BOX_W - 6, BOX_Y + 6, 18, 0xaa2222, 0.9)
+        .setStrokeStyle(2, 0xff4444, 0.8).setInteractive({ useHandCursor: true });
+      this.add.text(BOX_X + BOX_W - 6, BOX_Y + 6, '✕', {
+        fontFamily: 'monospace', fontSize: '18px', color: '#ffffff',
+        stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5);
+      closeBg.on('pointerdown', () => this._tryClose());
+    }
 
     // ── Hint (adaptive — updated each frame) ────────────────────────────
     this._hint = this.add.text(GAME_W / 2, BOX_Y + BOX_H - 10, '', {
@@ -150,6 +161,10 @@ export default class SearchScene extends Phaser.Scene {
   // ═══════════════════════════════════════════════════════════════════════
 
   _refreshHint() {
+    if (IS_MOBILE) {
+      this._hint.setText('Tap item to take   ✕ to close');
+      return;
+    }
     const gp = this.registry.get('inputMode') === 'gp';
     this._hint.setText(gp
       ? 'A: take   B: close'
@@ -230,6 +245,18 @@ export default class SearchScene extends Phaser.Scene {
 
       const bg = this.add.rectangle(GAME_W / 2, ry, BOX_W - 20, ITEM_ROW_H - 4, 0x222244, 0.6)
         .setStrokeStyle(1, 0x444466, 0.4);
+
+      if (IS_MOBILE) {
+        bg.setInteractive({ useHandCursor: true });
+        bg.on('pointerdown', () => {
+          if (this._selectedIdx === i) {
+            this._takeSelected();
+          } else {
+            this._selectedIdx = i;
+            this._updateCursorPos();
+          }
+        });
+      }
 
       const icon = this.add.text(GAME_W / 2 - BOX_W / 2 + 30, ry, '?', {
         fontFamily: 'monospace', fontSize: '18px', color: '#666',

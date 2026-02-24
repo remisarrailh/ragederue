@@ -25,17 +25,21 @@ export default class GameOverScene extends Phaser.Scene {
       fontFamily: 'monospace', fontSize: '24px', color: '#00ffcc',
     }).setOrigin(0.5);
 
-    const hint = this.add.text(cx, cy + 90, 'PRESS ENTER  or  START  TO RETRY', {
+    const hint = this.add.text(cx, cy + 90, 'TAP / ENTER / START  TO RETRY', {
       fontFamily: 'monospace', fontSize: '16px', color: '#666666',
     }).setOrigin(0.5);
 
     // Blink hint
     this.tweens.add({ targets: hint, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
 
-    // Input — Enter (keyboard) or Start (gamepad index 9)
+    // Input — Enter (keyboard) or Start (gamepad index 9) or tap (mobile)
     this.input.keyboard.once('keydown-ENTER', () => this._restart());
     this.input.gamepad.on('down', (pad, button) => {
       if (button.index === 9) this._restart();
+    });
+    // Delay touch so the player doesn't accidentally tap through
+    this.time.delayedCall(800, () => {
+      this.input.once('pointerdown', () => this._restart());
     });
   }
 

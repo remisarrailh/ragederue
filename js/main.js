@@ -11,7 +11,7 @@ import HideoutChestScene    from './scenes/HideoutChestScene.js';
 import MobileControlsScene from './scenes/MobileControlsScene.js';
 import GameOverScene        from './scenes/GameOverScene.js';
 import WinScene             from './scenes/WinScene.js';
-import { GAME_W, GAME_H } from './config/constants.js';
+import { GAME_W, GAME_H, IS_MOBILE } from './config/constants.js';
 
 const config = {
   type: Phaser.AUTO,
@@ -35,7 +35,10 @@ const config = {
   scene: [PreloadScene, TitleScene, CharacterScene, LevelEditorScene, GameScene, HUDScene, PauseScene, InventoryScene, SearchScene, HideoutChestScene, MobileControlsScene, GameOverScene, WinScene]
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+
+// ── Expose game instance for fullscreen toggle ──────────────────────────
+window.__RAGEDERUE_GAME = game;
 
 // ── Out-of-focus overlay (DOM, visible over all Phaser scenes) ────────────
 const focusOverlay = document.getElementById('focus-overlay');

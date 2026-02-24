@@ -38,19 +38,24 @@ export default class WinScene extends Phaser.Scene {
       stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5);
 
-    const hint = this.add.text(cx, cy + 140, 'PRESS SPACE  or  A  TO PLAY AGAIN', {
+    const hint = this.add.text(cx, cy + 140, 'TAP / SPACE / A  TO PLAY AGAIN', {
       fontFamily: 'monospace', fontSize: '15px', color: '#666666',
     }).setOrigin(0.5);
 
     this.tweens.add({ targets: hint, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
 
-    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+    const restart = () => this.scene.start('GameScene');
+    this.input.keyboard.once('keydown-SPACE', restart);
     if (this.input.gamepad.total > 0) {
-      this.input.gamepad.once('down', () => this.scene.start('GameScene'));
+      this.input.gamepad.once('down', restart);
     } else {
       this.input.gamepad.on('connected', () => {
-        this.input.gamepad.once('down', () => this.scene.start('GameScene'));
+        this.input.gamepad.once('down', restart);
       });
     }
+    // Delay touch so the player doesn't accidentally tap through
+    this.time.delayedCall(800, () => {
+      this.input.once('pointerdown', restart);
+    });
   }
 }

@@ -14,6 +14,7 @@
 export const ITEM_DEFS = {
   ethereum: {
     texture:     'eth',
+    category:    'argent',
     invW: 1, invH: 1,
     useTime:     0,
     healAmount:  0,
@@ -24,6 +25,7 @@ export const ITEM_DEFS = {
   },
   sushi: {
     texture:     'sushi',
+    category:    'soin',
     invW: 2, invH: 1,
     useTime:     1500,
     healAmount:  20,
@@ -35,6 +37,7 @@ export const ITEM_DEFS = {
   },
   pizza: {
     texture:     'pizza',
+    category:    'soin',
     invW: 2, invH: 2,
     useTime:     2000,
     healAmount:  35,
@@ -46,6 +49,7 @@ export const ITEM_DEFS = {
   },
   ice_cream: {
     texture:     'ice_cream',
+    category:    'soin',
     invW: 1, invH: 2,
     useTime:     1200,
     healAmount:  15,
@@ -58,6 +62,7 @@ export const ITEM_DEFS = {
   },
   water_bottle: {
     texture:     'ice_cream',
+    category:    'soin',
     invW: 1, invH: 1,
     useTime:     800,
     healAmount:  0,
@@ -69,6 +74,7 @@ export const ITEM_DEFS = {
   },
   item_1771877262675: {
     texture:     'barrel',
+    category:    'divers',
     invW: 1, invH: 1,
     useTime:     0,
     healAmount:  0,

@@ -327,7 +327,7 @@ export function encodeCharDelete(charId) {
   return buf;
 }
 
-/** S_CHAR_LIST: type(1) + count(u8) + [ idLen+id + nameLen+name ]* */
+/** S_CHAR_LIST: type(1) + count(u8) + [ idLen+id + nameLen+name + inGame(u8) ]* */
 export function decodeCharList(buf) {
   const u8    = new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
   const count = u8[1];
@@ -339,7 +339,8 @@ export function decodeCharList(buf) {
     const id    = dec.decode(u8.slice(off, off + idLen)); off += idLen;
     const nameLen = u8[off++];
     const name  = dec.decode(u8.slice(off, off + nameLen)); off += nameLen;
-    chars.push({ id, name });
+    const inGame = u8[off++] === 1;
+    chars.push({ id, name, inGame });
   }
   return chars;
 }

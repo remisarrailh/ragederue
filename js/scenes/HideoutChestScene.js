@@ -1,4 +1,4 @@
-import { GAME_W, GAME_H } from '../config/constants.js';
+import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
 import { ITEM_DEFS }      from '../config/lootTable.js';
 
 /**
@@ -20,7 +20,6 @@ import { ITEM_DEFS }      from '../config/lootTable.js';
  * via C_CHEST_SAVE on each transfer and on close.
  */
 
-const CHEST_MAX = 30;
 
 const BOX_W = 280;
 const BOX_H = 320;
@@ -32,6 +31,20 @@ const BOX_Y   = Math.round((GAME_H - BOX_H) / 2) - 20;
 const ITEM_ROW_H   = 26;
 const ITEMS_START_Y = BOX_Y + 60;
 const MAX_VISIBLE   = 9;    // rows visible per panel
+const ICON_SIZE    = 18;    // sprite icon width & height in rows
+const ICON_OFFSET_X = 12;   // x offset from panel left edge to icon centre
+const LABEL_OFFSET_X = 28;  // x offset from panel left edge to text
+
+// Category sort order (lower = first)
+const CAT_ORDER = { argent: 0, soin: 1, divers: 2 };
+function sortItems(types) {
+  return [...types].sort((a, b) => {
+    const ca = CAT_ORDER[ITEM_DEFS[a]?.category] ?? 99;
+    const cb = CAT_ORDER[ITEM_DEFS[b]?.category] ?? 99;
+    if (ca !== cb) return ca - cb;
+    return a.localeCompare(b);
+  });
+}
 
 export default class HideoutChestScene extends Phaser.Scene {
   constructor() { super({ key: 'HideoutChestScene' }); }
@@ -89,6 +102,25 @@ export default class HideoutChestScene extends Phaser.Scene {
         fontFamily: 'monospace', fontSize: '10px', color: '#777799',
       },
     ).setOrigin(0.5);
+
+    // ── Mobile buttons ────────────────────────────────────────────────────
+    if (IS_MOBILE) {
+      // Close button
+      const closeBtn = this.add.text(GAME_W - 20, BOX_Y + 10, '✕', {
+        fontFamily: 'monospace', fontSize: '22px', color: '#ff4444',
+        stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      closeBtn.on('pointerdown', () => this._doClose());
+
+      // Transfer button (centre between panels)
+      const tbY = GAME_H / 2;
+      const transferBtn = this.add.rectangle(GAME_W / 2, tbY, 44, 36, 0x228855, 0.85)
+        .setStrokeStyle(2, 0x00ffcc, 0.6).setInteractive({ useHandCursor: true });
+      this.add.text(GAME_W / 2, tbY, '⇄', {
+        fontFamily: 'monospace', fontSize: '18px', color: '#ffffff',
+      }).setOrigin(0.5);
+      transferBtn.on('pointerdown', () => this._transfer());
+    }
 
     // ── Hint ──────────────────────────────────────────────────────────────
     this._hint = this.add.text(GAME_W / 2, BOX_Y + BOX_H - 4, '', {
@@ -199,18 +231,19 @@ export default class HideoutChestScene extends Phaser.Scene {
       if (items.length === 0) return;
       const item = items[this._playerSel];
       if (!item) return;
-      if (this._chestItems.length >= CHEST_MAX) return;
       this.inventory.removeItem(item);
       this._chestItems.push(item.type);
       // clamp selection
       this._playerSel = Math.min(this._playerSel, Math.max(0, this._playerItems().length - 1));
     } else {
-      // Move from chest → player inventory
+      // Move from chest → player inventory (use sorted view to find correct item)
       if (this._chestItems.length === 0) return;
-      const type = this._chestItems[this._chestSel];
+      const sorted = sortItems(this._chestItems);
+      const type = sorted[this._chestSel];
       if (!type) return;
       if (!this.inventory.hasRoom(type)) return;
-      this._chestItems.splice(this._chestSel, 1);
+      const rawIdx = this._chestItems.indexOf(type);
+      this._chestItems.splice(rawIdx, 1);
       this.inventory.addItem(type, true);
       // clamp selection
       this._chestSel = Math.min(this._chestSel, Math.max(0, this._chestItems.length - 1));
@@ -237,79 +270,80 @@ export default class HideoutChestScene extends Phaser.Scene {
 
     const playerItems = this._playerItems();
     this._countPlayer.setText(`${playerItems.length} objet(s)`);
-    this._countChest.setText(`${this._chestItems.length} / ${CHEST_MAX}`);
+    this._countChest.setText(`${this._chestItems.length} objet(s)`);
 
-    // Draw player items
-    const pBaseX = START_X;
-    const visP = playerItems.slice(this._playerScroll, this._playerScroll + MAX_VISIBLE);
+    // ── Helper: draw one item row ────────────────────────────────────────
+    const drawRow = (side, baseX, type, texture, label, ry, isSelected, absIdx) => {
+      const selColorBg  = side === 'player' ? 0x223355 : 0x1a3322;
+      const bg = this.add.rectangle(baseX + BOX_W / 2, ry, BOX_W - 20, ITEM_ROW_H - 3,
+        isSelected ? selColorBg : 0x1a1a33, isSelected ? 0.9 : 0.6,
+      ).setStrokeStyle(1, 0x334466, 0.4).setInteractive();
+
+      // Touch: tap to select, tap selected to transfer
+      bg.on('pointerdown', () => {
+        const sel = side === 'player' ? '_playerSel' : '_chestSel';
+        if (this._activePanel === side && this[sel] === absIdx) {
+          this._transfer();
+        } else {
+          this._activePanel = side;
+          this[sel] = absIdx;
+          this._updateFocus();
+          this._redraw();
+        }
+      });
+
+      // Icon sprite (scaled to fit ICON_SIZE)
+      const icon = this.add.image(baseX + ICON_OFFSET_X, ry, texture)
+        .setDisplaySize(ICON_SIZE, ICON_SIZE)
+        .setOrigin(0.5, 0.5);
+
+      const txt = this.add.text(baseX + LABEL_OFFSET_X, ry, label, {
+        fontFamily: 'monospace', fontSize: '10px',
+        color: side === 'player' ? '#ccccdd' : '#ccddcc',
+      }).setOrigin(0, 0.5);
+
+      this._rowObjs[side].push(bg, icon, txt);
+    };
+
+    // ── Player items ─────────────────────────────────────────────────────
+    const pBaseX  = START_X;
+    const visP    = playerItems.slice(this._playerScroll, this._playerScroll + MAX_VISIBLE);
     visP.forEach((item, vi) => {
-      const ry  = ITEMS_START_Y + vi * ITEM_ROW_H;
-      const absI = vi + this._playerScroll;
-      const def  = ITEM_DEFS[item.type] ?? {};
-      const isSelected = absI === this._playerSel && this._activePanel === 'player';
-
-      const bg = this.add.rectangle(pBaseX + BOX_W / 2, ry, BOX_W - 20, ITEM_ROW_H - 3,
-        isSelected ? 0x223355 : 0x1a1a33, isSelected ? 0.9 : 0.6,
-      ).setStrokeStyle(1, 0x334466, 0.4);
-
-      const label = this.add.text(pBaseX + 14, ry,
-        def.description ?? item.type, {
-          fontFamily: 'monospace', fontSize: '10px',
-          color: '#ccccdd',
-        },
-      ).setOrigin(0, 0.5);
-
-      this._rowObjs.player.push(bg, label);
+      const ry       = ITEMS_START_Y + vi * ITEM_ROW_H;
+      const absI     = vi + this._playerScroll;
+      const def      = ITEM_DEFS[item.type] ?? {};
+      const selected = absI === this._playerSel && this._activePanel === 'player';
+      drawRow('player', pBaseX, item.type, def.texture ?? 'barrel', def.description ?? item.type, ry, selected, absI);
     });
 
-    // Scroll indicators
     if (this._playerScroll > 0) {
-      const up = this.add.text(pBaseX + BOX_W - 14, ITEMS_START_Y, '▲', {
-        fontFamily: 'monospace', fontSize: '10px', color: '#555577',
-      }).setOrigin(1, 0.5);
-      this._rowObjs.player.push(up);
+      this._rowObjs.player.push(this.add.text(pBaseX + BOX_W - 14, ITEMS_START_Y, '▲',
+        { fontFamily: 'monospace', fontSize: '10px', color: '#555577' }).setOrigin(1, 0.5));
     }
     if (this._playerScroll + MAX_VISIBLE < playerItems.length) {
-      const dn = this.add.text(pBaseX + BOX_W - 14, ITEMS_START_Y + (MAX_VISIBLE - 1) * ITEM_ROW_H, '▼', {
-        fontFamily: 'monospace', fontSize: '10px', color: '#555577',
-      }).setOrigin(1, 0.5);
-      this._rowObjs.player.push(dn);
+      this._rowObjs.player.push(this.add.text(pBaseX + BOX_W - 14, ITEMS_START_Y + (MAX_VISIBLE - 1) * ITEM_ROW_H, '▼',
+        { fontFamily: 'monospace', fontSize: '10px', color: '#555577' }).setOrigin(1, 0.5));
     }
 
-    // Draw chest items
-    const cBaseX = START_X + BOX_W + GAP;
-    const visC = this._chestItems.slice(this._chestScroll, this._chestScroll + MAX_VISIBLE);
+    // ── Chest items (sorted) ─────────────────────────────────────────────
+    const cBaseX     = START_X + BOX_W + GAP;
+    const sortedChest = sortItems(this._chestItems);
+    const visC        = sortedChest.slice(this._chestScroll, this._chestScroll + MAX_VISIBLE);
     visC.forEach((type, vi) => {
-      const ry   = ITEMS_START_Y + vi * ITEM_ROW_H;
-      const absI = vi + this._chestScroll;
-      const def  = ITEM_DEFS[type] ?? {};
-      const isSelected = absI === this._chestSel && this._activePanel === 'chest';
-
-      const bg = this.add.rectangle(cBaseX + BOX_W / 2, ry, BOX_W - 20, ITEM_ROW_H - 3,
-        isSelected ? 0x1a3322 : 0x1a1a33, isSelected ? 0.9 : 0.6,
-      ).setStrokeStyle(1, 0x334466, 0.4);
-
-      const label = this.add.text(cBaseX + 14, ry,
-        def.description ?? type, {
-          fontFamily: 'monospace', fontSize: '10px',
-          color: '#ccddcc',
-        },
-      ).setOrigin(0, 0.5);
-
-      this._rowObjs.chest.push(bg, label);
+      const ry       = ITEMS_START_Y + vi * ITEM_ROW_H;
+      const absI     = vi + this._chestScroll;
+      const def      = ITEM_DEFS[type] ?? {};
+      const selected = absI === this._chestSel && this._activePanel === 'chest';
+      drawRow('chest', cBaseX, type, def.texture ?? 'barrel', def.description ?? type, ry, selected, absI);
     });
 
     if (this._chestScroll > 0) {
-      const up = this.add.text(cBaseX + BOX_W - 14, ITEMS_START_Y, '▲', {
-        fontFamily: 'monospace', fontSize: '10px', color: '#555577',
-      }).setOrigin(1, 0.5);
-      this._rowObjs.chest.push(up);
+      this._rowObjs.chest.push(this.add.text(cBaseX + BOX_W - 14, ITEMS_START_Y, '▲',
+        { fontFamily: 'monospace', fontSize: '10px', color: '#555577' }).setOrigin(1, 0.5));
     }
     if (this._chestScroll + MAX_VISIBLE < this._chestItems.length) {
-      const dn = this.add.text(cBaseX + BOX_W - 14, ITEMS_START_Y + (MAX_VISIBLE - 1) * ITEM_ROW_H, '▼', {
-        fontFamily: 'monospace', fontSize: '10px', color: '#555577',
-      }).setOrigin(1, 0.5);
-      this._rowObjs.chest.push(dn);
+      this._rowObjs.chest.push(this.add.text(cBaseX + BOX_W - 14, ITEMS_START_Y + (MAX_VISIBLE - 1) * ITEM_ROW_H, '▼',
+        { fontFamily: 'monospace', fontSize: '10px', color: '#555577' }).setOrigin(1, 0.5));
     }
   }
 

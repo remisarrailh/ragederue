@@ -20,8 +20,18 @@ export default class NetworkHandlers {
     const scene = this.scene;
     const net   = scene.net;
 
+    // id → name cache, populated by S_PLAYER_JOIN
+    this._playerNames = new Map();
+
     net.onWelcome = (id) => {
       console.log(`[Game] Connected as player #${id}`);
+    };
+
+    net.onPlayerJoin = (id, name) => {
+      this._playerNames.set(id, name);
+      // Update label if RemotePlayer already exists (e.g. from snapshot)
+      const rp = scene.remotePlayers.get(id);
+      if (rp) rp.setName(name);
     };
 
     net.onSnapshot = (players) => {
@@ -31,7 +41,8 @@ export default class NetworkHandlers {
         seen.add(p.id);
         let rp = scene.remotePlayers.get(p.id);
         if (!rp) {
-          rp = new RemotePlayer(scene, p.id, `Player ${p.id}`, p.x, p.y);
+          const name = this._playerNames.get(p.id) ?? `Player ${p.id}`;
+          rp = new RemotePlayer(scene, p.id, name, p.x, p.y);
           scene.remotePlayers.set(p.id, rp);
         }
         rp.applySnapshot(p);
@@ -74,12 +85,26 @@ export default class NetworkHandlers {
       if (scene.player) scene.player.skills = skills;
     };
 
+    net.onChestData = (items) => {
+      // Update registry so HideoutChestScene picks it up on next open
+      scene.registry.set('chestItems', items);
+      // If the chest UI is currently open, refresh it live
+      const chestScene = scene.scene.get('HideoutChestScene');
+      if (chestScene && scene.scene.isActive('HideoutChestScene')) {
+        chestScene._chestItems = items.slice();
+        chestScene._chestSel   = Math.min(chestScene._chestSel, Math.max(0, items.length - 1));
+        chestScene._redraw();
+        chestScene._updateFocus();
+      }
+    };
+
     net.onWorldReset = (remainingTime) => {
       console.log('[Game] World reset received — new timer:', remainingTime);
       scene._handleWorldReset(remainingTime);
     };
 
     net.onPlayerLeave = (id) => {
+      this._playerNames.delete(id);
       const rp = scene.remotePlayers.get(id);
       if (rp) {
         rp.destroy();

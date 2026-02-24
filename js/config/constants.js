@@ -63,6 +63,9 @@ export const ENEMY_KNOCKDOWN_RECOVERY_MS = 900; // time on ground before getting
 // ─── Spawn ────────────────────────────────────────────────────────────────
 export const SPAWN_LEVEL        = 'level_03';  // niveau de départ après sélection du perso
 
+// ─── Version ──────────────────────────────────────────────────────────────
+export const GAME_VERSION       = '0.3.1';
+
 // ─── Debug ────────────────────────────────────────────────────────────────
 export const DEBUG_HITBOXES     = false;
 export const DEBUG_DEPTH        = false;

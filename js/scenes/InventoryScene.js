@@ -1,4 +1,4 @@
-import { GAME_W, GAME_H } from '../config/constants.js';
+import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
 import { ITEM_DEFS } from '../config/lootTable.js';
 
 const CELL    = 48;   // cell size in px
@@ -63,6 +63,15 @@ export default class InventoryScene extends Phaser.Scene {
     this._buildInventoryTab();
     this._buildStatsTab();
     this._switchTab(TAB_INV);
+
+    // ── Close button (mobile) ──────────────────────────────────────────────
+    if (IS_MOBILE) {
+      const closeBtn = this.add.text(GAME_W - 20, 18, '✕', {
+        fontFamily: 'monospace', fontSize: '22px', color: '#ff4444',
+        stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      closeBtn.on('pointerdown', () => this._close());
+    }
 
     // ── Hint (adaptive) ───────────────────────────────────────────────────
     this._hintText = this.add.text(GAME_W / 2, GAME_H - 16, '', {
@@ -205,6 +214,19 @@ export default class InventoryScene extends Phaser.Scene {
           fontFamily: 'monospace', fontSize: '28px', color: '#888888',
         }).setOrigin(0.5);
       }
+
+      // Touch: tap to select, tap again to use
+      bg.setInteractive();
+      const idx = this._itemSprites.length;
+      bg.on('pointerdown', () => {
+        if (this._selectedIdx === idx) {
+          this._useSelected();
+        } else {
+          this._selectedIdx = idx;
+          this._updateCursor();
+          this._updateInfo();
+        }
+      });
 
       this._itemSprites.push({ item, bg, icon, cx, cy, w, h });
       if (grp) { grp.push(bg); grp.push(icon); }
