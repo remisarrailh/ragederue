@@ -5,6 +5,7 @@ import {
   PLAYER_MAX_STAMINA, STAMINA_REGEN_RATE, STAMINA_REGEN_DELAY_MS,
   STAMINA_COST_PUNCH, STAMINA_COST_KICK, STAMINA_COST_JAB, STAMINA_COST_JUMP,
   STAMINA_LOW_THRESHOLD, STAMINA_DMG_MIN_MULT, STAMINA_SPD_MIN_MULT,
+  SPRINT_MULTIPLIER, STAMINA_COST_SPRINT, SPRINT_STAMINA_MIN, MOBILE_SPRINT_THRESHOLD,
   PLAYER_MAX_HUNGER, HUNGER_DRAIN_RATE, HUNGER_DAMAGE_RATE,
   PLAYER_MAX_THIRST, THIRST_DRAIN_RATE, THIRST_DAMAGE_RATE,
 } from '../config/constants.js';
@@ -66,8 +67,16 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.skills = {
       punchSkill: 0, kickSkill: 0, jabSkill: 0,
       moveSkill: 0, lootSkill: 0, healSkill: 0, eatSkill: 0,
+      runSkill: 0, jumpSkill: 0,
     };
-    this._moveXPAccum = 0;  // px parcourus accumulés pour moveSkill
+    this._moveXPAccum   = 0;  // px parcourus accumulés pour moveSkill
+    this._sprintXPAccum = 0;  // px en sprint accumulés pour runSkill
+    this._isSprinting   = false;
+
+    // ── Upgrades planque (reçus du serveur via S_UPGRADES) ─────────────────
+    this.upgrades = {
+      cuisine: 0, filtration: 0, coffre: 0, gym: 0, atelier: 0,
+    };
 
     // ── State machine ──────────────────────────────────────────────────────
     this.state        = 'idle';   // idle | walk | punch | kick | jab | jump | jump_kick | hurt
@@ -80,12 +89,13 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.inMenu       = false;    // true while Settings/Pause menu is open
 
     // ── Keyboard attack keys ───────────────────────────────────────────────
-    // X=punch  C=kick  V=jab  SPACE=jump
+    // X=punch  C=kick  V=jab  SPACE=jump  SHIFT=sprint
     this.attackKeys = {
-      punch: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X),
-      kick:  scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C),
-      jab:   scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.V),
-      jump:  scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+      punch:  scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X),
+      kick:   scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C),
+      jab:    scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.V),
+      jump:   scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+      sprint: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT),
     };
 
     // ── Mobile touch input (fed by MobileControlsScene) ───────────────────
@@ -201,10 +211,12 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     // Death check
     if (this.hp <= 0) {
       this.state = 'dead';
+      this.hp    = 0;
       this.setVelocity(0, 0);
       this.play('player_hurt', true);
       this.scene.sound.play('sfx_death_player', { volume: this.scene.registry.get('sfxVol') ?? 0.5 });
-      return;  // GameScene.update() will detect hp <= 0 and end the game
+      this._applyDeathPenalty();
+      return;  // GameScene waits for a revive or ends the game if no teammate
     }
 
     this.state = 'hurt';
@@ -273,7 +285,8 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     // ── Ground actions ─────────────────────────────────────────────
     if (jumpDown && this.state !== 'punch' && this.state !== 'kick' && this.state !== 'jab') {
       if (this.stamina >= this.maxStamina * STAMINA_LOW_THRESHOLD) {
-        this._drainStamina(STAMINA_COST_JUMP);
+        const jumpCost = Math.max(4, STAMINA_COST_JUMP - this._skillLevel('jumpSkill') * 0.16);
+        this._drainStamina(jumpCost);
         this._startJump();
       }
     } else if (punchDown) {
@@ -304,18 +317,26 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     // Keep current horizontal velocity for air momentum
     this.body.setVelocityY(0);
 
+    // jumpSkill : +2% hauteur/niveau, −0.2 pts stamina/niveau (min 4)
+    const jumpLevel  = this._skillLevel('jumpSkill');
+    const jumpHeight = JUMP_HEIGHT * (1 + jumpLevel * 0.02);
+    const jumpDur    = JUMP_DURATION;  // durée inchangée
+
+    // XP : 2 XP par saut
+    if (this.scene.net?.sendSkillGain) this.scene.net.sendSkillGain('jumpSkill', 2);
+
     // Arc ascent then descent
     this.scene.tweens.add({
       targets: this,
-      y: this._groundY - JUMP_HEIGHT,
-      duration: JUMP_DURATION * 0.45,
+      y: this._groundY - jumpHeight,
+      duration: jumpDur * 0.45,
       ease: 'Sine.easeOut',
       onComplete: () => {
         // Descent
         this.scene.tweens.add({
           targets: this,
           y: this._groundY,
-          duration: JUMP_DURATION * 0.55,
+          duration: jumpDur * 0.55,
           ease: 'Sine.easeIn',
           onComplete: () => this._land(),
         });
@@ -352,9 +373,12 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
     // ── Mode Planque : regen HP / faim / soif automatique ────────────────
     if (this.scene._levelConfig?.isPlanque) {
+      const ups           = this.upgrades ?? {};
+      const hungerMult    = [1, 2, 3.5, 6][ups.cuisine    ?? 0] ?? 1;
+      const thirstMult    = [1, 2, 3.5, 6][ups.filtration ?? 0] ?? 1;
       this.hp     = Math.min(this.maxHp,     this.hp     + 5  * dtSec);
-      this.hunger = Math.min(this.maxHunger, this.hunger + 10 * dtSec);
-      this.thirst = Math.min(this.maxThirst, this.thirst + 15 * dtSec);
+      this.hunger = Math.min(this.maxHunger, this.hunger + 10 * dtSec * hungerMult);
+      this.thirst = Math.min(this.maxThirst, this.thirst + 15 * dtSec * thirstMult);
       this._hungerDmgAccum = 0;
       this._thirstDmgAccum = 0;
       return;
@@ -386,6 +410,37 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this._staminaRegenTimer = STAMINA_REGEN_DELAY_MS;
   }
 
+  /** Called on death — drops hunger/thirst to 10%, removes 10% of inventory items randomly. */
+  _applyDeathPenalty() {
+    // Survie → 10%
+    this.hunger = this.maxHunger * 0.10;
+    this.thirst = this.maxThirst * 0.10;
+
+    // Inventaire → retirer 10% des items aléatoirement (arrondi au supérieur)
+    const inv = this.scene?.inventory;
+    if (inv && inv.items.length > 0) {
+      const dropCount = Math.max(1, Math.ceil(inv.items.length * 0.10));
+      for (let i = 0; i < dropCount; i++) {
+        if (inv.items.length === 0) break;
+        const idx = Math.floor(Math.random() * inv.items.length);
+        inv.items.splice(idx, 1);
+      }
+    }
+  }
+
+  /**
+   * Revive this player (called by another player's revive action).
+   * @param {number} hpAmount  HP to restore on revive
+   */
+  revive(hpAmount = 30) {
+    if (this.state !== 'dead') return;
+    this.hp        = Math.min(this.maxHp, hpAmount);
+    this.state     = 'idle';
+    this.isInvincible = false;
+    this.setAlpha(1);
+    this.play('player_idle', true);
+  }
+
   _skillLevel(name) {
     let xp = this.skills[name] ?? 0;
     let lvl = 0;
@@ -404,9 +459,10 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     const right = cursors.right.isDown || wasd.right.isDown;
     const up    = cursors.up.isDown    || wasd.up.isDown;
     const down  = cursors.down.isDown  || wasd.down.isDown;
+    const shiftDown = this.attackKeys.sprint.isDown;
 
     // ── Gamepad ──────────────────────────────────────────────────────────
-    let gpX = 0, gpY = 0;
+    let gpX = 0, gpY = 0, gpSprint = false;
     const chosenPadMove = this.scene.registry.get('padIndex') ?? 0;
     const gp = this.scene.input.gamepad;
     if (chosenPadMove >= 0 && gp && gp.total > 0 && document.hasFocus()) {
@@ -419,13 +475,19 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
         if (pad.right.isDown) gpX =  1;
         if (pad.up.isDown)    gpY = -1;
         if (pad.down.isDown)  gpY =  1;
+        // Gâchette droite (R2/RT) = bouton index 7
+        gpSprint = (pad.buttons[7]?.value ?? 0) > 0.3;
       }
     }
 
     // ── Mobile joystick (overrides gamepad if active) ────────────────────
+    let mobileSprintActive = false;
     if (this.mobileJoy.x !== 0 || this.mobileJoy.y !== 0) {
       gpX = this.mobileJoy.x;
       gpY = this.mobileJoy.y;
+      // Sprint mobile : joystick poussé fort (≥ MOBILE_SPRINT_THRESHOLD)
+      const joyMag = Math.sqrt(gpX * gpX + gpY * gpY);
+      mobileSprintActive = joyMag >= MOBILE_SPRINT_THRESHOLD;
     }
 
     let vx = gpX * PLAYER_SPEED;
@@ -452,32 +514,67 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
     if (this.stamina <= 0) { vx *= 0.6; vy *= 0.6; }
 
-    // Bonus vitesse (moveSkill)
+    // ── Sprint ────────────────────────────────────────────────────────────
+    const dt = this.scene.game.loop.delta;
+    const wantSprint = (shiftDown || gpSprint || mobileSprintActive)
+                     && (Math.abs(vx) > 1 || Math.abs(vy) > 1);
+    const runLevel   = this._skillLevel('runSkill');
+    // Le sprint démarre si on veut courir ET qu'on a assez de stamina
+    // Il continue tant que la stamina n'est pas épuisée (seuil 0)
+    if (wantSprint && (this.stamina > 0) && (this._isSprinting || this.stamina >= SPRINT_STAMINA_MIN)) {
+      this._isSprinting = true;
+      // Coût continu : 18 pts/s diminué de 0.3 pt/lv (min 5 pts/s à lvl 43+)
+      const costPerSec = Math.max(5, STAMINA_COST_SPRINT - runLevel * 0.3);
+      this._drainStamina(costPerSec * (dt / 1000));
+      // Vitesse sprint : base x1.65, +1% vitesse par niveau runSkill
+      const sprintMult = SPRINT_MULTIPLIER * (1 + runLevel * 0.01);
+      vx *= sprintMult;
+      vy *= sprintMult;
+    } else {
+      this._isSprinting = false;
+    }
+
+    // Bonus vitesse (moveSkill, s'applique en plus)
     const speedMult = this._skillBonus('moveSkill');
     vx *= speedMult;
     vy *= speedMult;
 
     this.setVelocity(vx, vy);
 
-    // XP de déplacement : 1 XP par 200px parcourus
-    const dt = this.scene.game.loop.delta;
+    // XP déplacement : 1 XP par 200px parcourus (marche)
+    // XP sprint      : 1 XP par 300px courus en sprint
     const dist = Math.sqrt(vx * vx + vy * vy) * (dt / 1000);
     this._moveXPAccum += dist;
     if (this._moveXPAccum >= 200) {
       this._moveXPAccum -= 200;
       if (this.scene.net?.sendSkillGain) this.scene.net.sendSkillGain('moveSkill', 1);
     }
+    if (this._isSprinting) {
+      this._sprintXPAccum += dist;
+      if (this._sprintXPAccum >= 300) {
+        this._sprintXPAccum -= 300;
+        if (this.scene.net?.sendSkillGain) this.scene.net.sendSkillGain('runSkill', 1);
+      }
+    }
+
     this.y = Phaser.Math.Clamp(this.y, this.scene.laneTop ?? LANE_TOP, this.scene.laneBottom ?? LANE_BOTTOM);
 
     if (vx < 0)      { this.setFlipX(true);  this.facing = -1; }
     else if (vx > 0) { this.setFlipX(false); this.facing =  1; }
 
     const moving = Math.abs(vx) > 1 || Math.abs(vy) > 1;
-    if (moving && this.state !== 'walk') {
-      this.state = 'walk';
-      this.play('player_walk', true);
+    if (moving) {
+      if (this._isSprinting) {
+        // Sprint : player_walk accéléré
+        if (this.state !== 'walk') { this.state = 'walk'; this.play('player_walk', true); }
+        this.anims.timeScale = 1.6;
+      } else {
+        if (this.state !== 'walk') { this.state = 'walk'; this.play('player_walk', true); }
+        this.anims.timeScale = 1.0;
+      }
     } else if (!moving && this.state !== 'idle') {
       this.state = 'idle';
+      this.anims.timeScale = 1.0;
       this.play('player_idle', true);
     }
   }

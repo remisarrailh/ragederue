@@ -85,6 +85,12 @@ export default class NetworkHandlers {
       if (scene.player) scene.player.skills = skills;
     };
 
+    net.onUpgrades = (upgrades) => {
+      if (scene.player) scene.player.upgrades = upgrades;
+      // Update registry so HideoutUpgradeScene picks it up on next open
+      scene.registry.set('upgrades', upgrades);
+    };
+
     net.onChestData = (items) => {
       // Update registry so HideoutChestScene picks it up on next open
       scene.registry.set('chestItems', items);
@@ -109,6 +115,22 @@ export default class NetworkHandlers {
       if (rp) {
         rp.destroy();
         scene.remotePlayers.delete(id);
+      }
+    };
+
+    // ── Revive: a player has been revived by an ally ─────────────────────
+    net.onRevive = (targetPlayerId) => {
+      if (targetPlayerId === net.playerId) {
+        // This client's player is being revived
+        if (scene.player) scene.player.revive(30);
+        scene._clearDownOverlay();
+      } else {
+        // A remote player is being revived — update their state locally
+        const rp = scene.remotePlayers.get(targetPlayerId);
+        if (rp) {
+          rp.hp    = 30;
+          rp.state = 'idle';
+        }
       }
     };
 

@@ -8,6 +8,7 @@ import PauseScene        from './scenes/PauseScene.js';
 import InventoryScene    from './scenes/InventoryScene.js';
 import SearchScene       from './scenes/SearchScene.js';
 import HideoutChestScene    from './scenes/HideoutChestScene.js';
+import HideoutUpgradeScene  from './scenes/HideoutUpgradeScene.js';
 import MobileControlsScene from './scenes/MobileControlsScene.js';
 import GameOverScene        from './scenes/GameOverScene.js';
 import WinScene             from './scenes/WinScene.js';
@@ -32,7 +33,7 @@ const config = {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
-  scene: [PreloadScene, TitleScene, CharacterScene, LevelEditorScene, GameScene, HUDScene, PauseScene, InventoryScene, SearchScene, HideoutChestScene, MobileControlsScene, GameOverScene, WinScene]
+  scene: [PreloadScene, TitleScene, CharacterScene, LevelEditorScene, GameScene, HUDScene, PauseScene, InventoryScene, SearchScene, HideoutChestScene, HideoutUpgradeScene, MobileControlsScene, GameOverScene, WinScene]
 };
 
 const game = new Phaser.Game(config);

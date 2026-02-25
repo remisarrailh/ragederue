@@ -61,7 +61,7 @@ export const ITEM_DEFS = {
     description: 'Ice Cream — +15 HP, +20 faim, +15 soif',
   },
   water_bottle: {
-    texture:     'ice_cream',
+    texture:     'water_bottle',
     category:    'soin',
     invW: 1, invH: 1,
     useTime:     800,
@@ -72,40 +72,111 @@ export const ITEM_DEFS = {
     glowColor:   0x44aaff,
     description: 'Bouteille d\'eau — +50 soif',
   },
-  item_1771877262675: {
-    texture:     'barrel',
-    category:    'divers',
+  vis: {
+    texture:     'vis',
+    category:    'craft',
     invW: 1, invH: 1,
     useTime:     0,
     healAmount:  0,
     value:       0,
-    displayW: 32, displayH: 32,
-    glowColor:   0xffffff,
-    description: 'New item',
+    displayW: 24, displayH: 24,
+    glowColor:   0xaaaaaa,
+    description: 'Vis — matériau de fabrication',
+  },
+  clou: {
+    texture:     'clou',
+    category:    'craft',
+    invW: 1, invH: 1,
+    useTime:     0,
+    healAmount:  0,
+    value:       0,
+    displayW: 24, displayH: 24,
+    glowColor:   0xbbbbbb,
+    description: 'Clou — matériau de fabrication',
+  },
+  planche: {
+    texture:     'planche',
+    category:    'craft',
+    invW: 2, invH: 1,
+    useTime:     0,
+    healAmount:  0,
+    value:       0,
+    displayW: 48, displayH: 24,
+    glowColor:   0xaa8844,
+    description: 'Planche — matériau de fabrication',
+  },
+  tuyau: {
+    texture:     'tuyau',
+    category:    'craft',
+    invW: 1, invH: 2,
+    useTime:     0,
+    healAmount:  0,
+    value:       0,
+    displayW: 24, displayH: 48,
+    glowColor:   0x6699aa,
+    description: 'Tuyau — matériau de fabrication',
   },
 };
 
-// ── Loot tables for containers and enemy corpses ──────────────────────────
-// Each entry: { type, weight }  — weight is relative probability
-export const CONTAINER_LOOT_TABLE = [
-  { type: 'ethereum', weight: 20 },
-  { type: 'sushi', weight: 25 },
-  { type: 'pizza', weight: 15 },
-  { type: 'ice_cream', weight: 25 },
-  { type: 'water_bottle', weight: 20 },
-];
+// ── Loot tables par type de container (clé = texture) ──────────────────────────
+export const CONTAINER_LOOT_TABLES = {
+  default: [
+    { type: 'sushi', weight: 25 },
+    { type: 'pizza', weight: 15 },
+    { type: 'ice_cream', weight: 20 },
+    { type: 'water_bottle', weight: 20 },
+    { type: 'ethereum', weight: 10 },
+    { type: 'vis', weight: 5 },
+    { type: 'clou', weight: 5 },
+  ],
+  barrel: [
+    { type: 'sushi', weight: 28 },
+    { type: 'pizza', weight: 18 },
+    { type: 'ice_cream', weight: 22 },
+    { type: 'water_bottle', weight: 15 },
+  ],
+  toolbox: [
+    { type: 'vis', weight: 40 },
+    { type: 'clou', weight: 35 },
+    { type: 'planche', weight: 15 },
+    { type: 'tuyau', weight: 5 },
+  ],
+};
 
-export const CORPSE_LOOT_TABLE = [
-  { type: 'ethereum', weight: 40 },
-  { type: 'sushi', weight: 20 },
-  { type: 'ice_cream', weight: 20 },
-  { type: 'pizza', weight: 5 },
-  { type: 'water_bottle', weight: 15 },
-];
+// ── Nombre d'items par type de container ─────────────────────────────────────
+export const CONTAINER_ITEM_COUNTS = {
+  default: { min: 1, max: 3 },
+  barrel: { min: 1, max: 3 },
+  toolbox: { min: 2, max: 4 },
+};
 
-// How many items a container / corpse can hold (random between min–max)
-export const CONTAINER_ITEM_COUNT = { min: 1,  max: 3 };
-export const CORPSE_ITEM_COUNT   = { min: 0, max: 2 };
+// ── Loot tables par type d'ennemi (clé = type) ───────────────────────────────
+export const ENEMY_LOOT_TABLES = {
+  default: [
+    { type: 'ethereum', weight: 35 },
+    { type: 'sushi', weight: 22 },
+    { type: 'ice_cream', weight: 18 },
+    { type: 'pizza', weight: 10 },
+    { type: 'water_bottle', weight: 15 },
+  ],
+  punk: [
+    { type: 'sushi', weight: 22 },
+    { type: 'water_bottle', weight: 15 },
+  ],
+  brute: [
+    { type: 'ethereum', weight: 20 },
+    { type: 'pizza', weight: 30 },
+    { type: 'sushi', weight: 25 },
+    { type: 'tuyau', weight: 10 },
+  ],
+};
+
+// ── Nombre d'items par type d'ennemi ─────────────────────────────────────────
+export const ENEMY_ITEM_COUNTS = {
+  default: { min: 0, max: 2 },
+  punk: { min: 1, max: 2 },
+  brute: { min: 1, max: 3 },
+};
 
 // ── Search timing ─────────────────────────────────────────────────────────
 export const SEARCH_OPEN_MS       = 800;   // time to open a container/body

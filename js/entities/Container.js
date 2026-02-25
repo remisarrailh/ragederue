@@ -1,4 +1,4 @@
-import { CONTAINER_LOOT_TABLE, CONTAINER_ITEM_COUNT, rollLoot } from '../config/lootTable.js';
+import { CONTAINER_LOOT_TABLES, CONTAINER_ITEM_COUNTS, rollLoot } from '../config/lootTable.js';
 import { updateDepth } from '../systems/DepthSystem.js';
 
 /**
@@ -20,7 +20,11 @@ export default class Container {
 
     // ── Visual ────────────────────────────────────────────────────────────
     this.image = scene.add.image(x, y, texture).setOrigin(0.5, 1);
-    this.image.setDepth(y);
+    // Depth basé sur le milieu vertical du sprite : le joueur passe devant
+    // dès que ses pieds dépassent la moitié de la hauteur de l'objet.
+    // Cela évite que de grands sprites (workbench 128px) masquent le joueur
+    // qui se tient juste devant eux.
+    this.image.setDepth(y - this.image.displayHeight * 0.5);
 
     // ── Searchable properties ─────────────────────────────────────────────
     this.searchable = true;
@@ -31,8 +35,10 @@ export default class Container {
     if (opts.skipLoot) {
       this.lootItems = [];
     } else {
-      const count = Phaser.Math.Between(CONTAINER_ITEM_COUNT.min, CONTAINER_ITEM_COUNT.max);
-      this.lootItems = rollLoot(CONTAINER_LOOT_TABLE, count);
+      const table = CONTAINER_LOOT_TABLES[texture] ?? CONTAINER_LOOT_TABLES['default'] ?? [];
+      const cnt   = CONTAINER_ITEM_COUNTS[texture] ?? CONTAINER_ITEM_COUNTS['default'] ?? { min: 1, max: 3 };
+      const count = Phaser.Math.Between(cnt.min, cnt.max);
+      this.lootItems = rollLoot(table, count);
     }
   }
 

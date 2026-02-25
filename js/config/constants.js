@@ -37,6 +37,12 @@ export const STAMINA_LOW_THRESHOLD  = 0.1;    // fraction — saut bloqué en de
 export const STAMINA_DMG_MIN_MULT   = 0.3;    // multiplicateur de dégâts minimum (stamina vide)
 export const STAMINA_SPD_MIN_MULT   = 0.5;    // vitesse d'animation minimum (stamina vide)
 
+// ─── Sprint ────────────────────────────────────────────────────────────────
+export const SPRINT_MULTIPLIER       = 1.65;   // vitesse x1.65 en sprint
+export const STAMINA_COST_SPRINT     = 18;     // pts/s consommés pendant le sprint
+export const SPRINT_STAMINA_MIN      = 20;     // stamina minimale pour démarrer le sprint
+export const MOBILE_SPRINT_THRESHOLD = 0.75;   // magnitude joystick ≥ 0.75 → sprint auto
+
 // ─── Faim ─────────────────────────────────────────────────────────────────
 export const PLAYER_MAX_HUNGER   = 100;
 export const HUNGER_DRAIN_RATE   = 0.5;   // points/s (vide en ~200s ≈ 3min)
@@ -64,7 +70,7 @@ export const ENEMY_KNOCKDOWN_RECOVERY_MS = 900; // time on ground before getting
 export const SPAWN_LEVEL        = 'level_03';  // niveau de départ après sélection du perso
 
 // ─── Version ──────────────────────────────────────────────────────────────
-export const GAME_VERSION       = '0.3.1';
+export const GAME_VERSION       = '0.4.3';
 
 // ─── Debug ────────────────────────────────────────────────────────────────
 export const DEBUG_HITBOXES     = false;

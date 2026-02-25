@@ -18,6 +18,7 @@ const CharacterStore = require('./CharacterStore');
 const SharedChestStore = require('./SharedChestStore');
 const { xpToLevel } = CharacterStore;
 const { getLevelConfig } = require('./levelConfigs');
+const { getNextCost }   = require('./upgradeConfigs');
 
 // Characters currently in-game: Set of charId strings
 const activeChars = new Set();
@@ -152,10 +153,12 @@ wss.on('connection', (ws) => {
         // Send welcome with assigned ID
         ws.send(Protocol.encodeWelcome(player.id), { binary: true });
 
-        // Send skills if charId is known
+        // Send skills and upgrades if charId is known
         if (player.charId) {
           const skills = CharacterStore.getSkills(player.charId) ?? {};
           ws.send(Protocol.encodeSkills(skills), { binary: true });
+          const ups = CharacterStore.getUpgrades(player.charId);
+          ws.send(Protocol.encodeUpgrades(ups), { binary: true });
         }
 
         // Send existing players' names to the newcomer
@@ -231,6 +234,9 @@ wss.on('connection', (ws) => {
           // Send skill state to the client
           const skills = CharacterStore.getSkills(value) ?? {};
           ws.send(Protocol.encodeSkills(skills), { binary: true });
+          // Send upgrade levels to the client
+          const ups = CharacterStore.getUpgrades(value);
+          ws.send(Protocol.encodeUpgrades(ups), { binary: true });
           // Notify OTHER clients that this char is now taken
           const takenMsg = Protocol.encodeCharList(CharacterStore.getAll(), activeChars);
           for (const client of allClients) {
@@ -264,6 +270,28 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      case Protocol.C_UPGRADE_BUILD: {
+        if (!player.charId) break;
+        const { upgradeId } = Protocol.decodeUpgradeBuild(data);
+        const currentUpgrades = CharacterStore.getUpgrades(player.charId);
+        const currentLevel    = currentUpgrades[upgradeId] ?? 0;
+        const cost            = getNextCost(upgradeId, currentLevel);
+        if (!cost) {
+          console.log(`[Server] Upgrade "${upgradeId}" already maxed or unknown for ${player.charId}`);
+          break;
+        }
+        const result = CharacterStore.buildUpgrade(player.charId, upgradeId, cost);
+        if (!result) {
+          console.log(`[Server] Not enough items for upgrade "${upgradeId}" (char ${player.charId})`);
+          break;
+        }
+        console.log(`[Server] ${player.name} built "${upgradeId}" lv${result.upgrades[upgradeId]}`);
+        // Send updated upgrades and chest back to client
+        ws.send(Protocol.encodeUpgrades(result.upgrades), { binary: true });
+        ws.send(Protocol.encodeChestData(result.chestItems), { binary: true });
+        break;
+      }
+
       case Protocol.C_CHAR_DELETE: {
         const { charId } = Protocol.decodeCharDelete(data);
         // Cannot delete a character that is currently in-game
@@ -271,6 +299,15 @@ wss.on('connection', (ws) => {
           CharacterStore.delete(charId);
         }
         ws.send(Protocol.encodeCharList(CharacterStore.getAll(), activeChars), { binary: true });
+        break;
+      }
+
+      case Protocol.C_REVIVE_PLAYER: {
+        if (!player.room) break;
+        const { targetPlayerId } = Protocol.decodeRevivePlayer(data);
+        // Broadcast to everyone in the room (including the revived player's client)
+        player.room.broadcast(Protocol.encodeReviveMsg(targetPlayerId));
+        console.log(`[Server] ${player.name} revived player id=${targetPlayerId}`);
         break;
       }
 

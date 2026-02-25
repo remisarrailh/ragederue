@@ -46,6 +46,7 @@ export default class PreloadScene extends Phaser.Scene {
 
     // ── Props ────────────────────────────────────────────────────────────
     this.load.image('barrel',      PR + 'barrel.png');
+    this.load.image('toolbox',     PR + 'toolbox.png');
     this.load.image('car',         PR + 'car.png');
     this.load.image('hydrant',     PR + 'hydrant.png');
     this.load.image('banner-hor1', PR + 'banner-hor/banner-hor1.png');
@@ -68,10 +69,21 @@ export default class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('player_hurt',      BG + 'hurt.png',      { frameWidth: fw, frameHeight: fh });
 
     // ── Loot sprites ─────────────────────────────────────────────────────
-    this.load.image('eth',       SP + 'eth.png');
-    this.load.image('sushi',     SP + 'sushi.png');
-    this.load.image('pizza',     SP + 'Cutted_Pizza.png');
-    this.load.image('ice_cream', SP + 'Ice_Cream.png');
+    this.load.image('eth',          SP + 'eth.png');
+    this.load.image('sushi',        SP + 'sushi.png');
+    this.load.image('pizza',        SP + 'Cutted_Pizza.png');
+    this.load.image('ice_cream',    SP + 'Ice_Cream.png');
+    this.load.image('water_bottle', SP + 'waterbottle.png');
+
+    // ── Matériaux de craft ────────────────────────────────────────────────
+    this.load.image('clou',    SP + 'nail.png');
+    this.load.image('vis',     SP + 'screws.png');
+    this.load.image('planche', SP + 'wood.png');
+    this.load.image('tuyau',   SP + 'pipe.png');
+
+    // ── Props planque ─────────────────────────────────────────────────────
+    this.load.image('coffrePlanque', SP + 'coffrePlanque.png');
+    this.load.image('workbench',     SP + 'workbench.png');
 
     // ── Enemy Punk ────────────────────────────────────────────────────────
     this.load.spritesheet('enemy_idle',  EP + 'idle.png',  { frameWidth: fw, frameHeight: fh });

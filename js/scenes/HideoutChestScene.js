@@ -21,19 +21,20 @@ import { ITEM_DEFS }      from '../config/lootTable.js';
  */
 
 
-const BOX_W = 280;
-const BOX_H = 320;
-const GAP   = 16;
+const MARGIN  = IS_MOBILE ? 8   : 20;
+const BOX_W   = IS_MOBILE ? Math.floor((GAME_W - MARGIN * 2 - 16) / 2) : 280;
+const BOX_H   = IS_MOBILE ? Math.round(GAME_H * 0.72) : 320;
+const GAP     = 16;
 const TOTAL_W = BOX_W * 2 + GAP;
 const START_X = Math.round((GAME_W - TOTAL_W) / 2);
-const BOX_Y   = Math.round((GAME_H - BOX_H) / 2) - 20;
+const BOX_Y   = Math.round((GAME_H - BOX_H) / 2) - (IS_MOBILE ? 10 : 20);
 
-const ITEM_ROW_H   = 26;
+const ITEM_ROW_H    = IS_MOBILE ? 36 : 26;
 const ITEMS_START_Y = BOX_Y + 60;
-const MAX_VISIBLE   = 9;    // rows visible per panel
-const ICON_SIZE    = 18;    // sprite icon width & height in rows
-const ICON_OFFSET_X = 12;   // x offset from panel left edge to icon centre
-const LABEL_OFFSET_X = 28;  // x offset from panel left edge to text
+const MAX_VISIBLE   = IS_MOBILE ? Math.floor((BOX_H - 70) / ITEM_ROW_H) : 9;
+const ICON_SIZE     = IS_MOBILE ? 26 : 18;
+const ICON_OFFSET_X = IS_MOBILE ? 18 : 12;
+const LABEL_OFFSET_X = IS_MOBILE ? 38 : 28;
 
 // Category sort order (lower = first)
 const CAT_ORDER = { argent: 0, soin: 1, divers: 2 };

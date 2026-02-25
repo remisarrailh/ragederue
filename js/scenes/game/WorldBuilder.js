@@ -106,7 +106,7 @@ export default class WorldBuilder {
 
   /**
    * Place a prop in the world.
-   * @param {{ type, x, y, scale?, blocksPlayer? }} p
+   * @param {{ type, x, y, scale?, blocksPlayer?, collision?: {offsetX?,offsetY?,width?,height?} }} p
    */
   _placeProp(p) {
     if (p.blocksPlayer) {
@@ -114,6 +114,16 @@ export default class WorldBuilder {
       const img = this.blockingGroup.create(p.x, p.y, p.type);
       img.setOrigin(0.5, 1).setScale(p.scale ?? 1).setDepth(p.y);
       img.refreshBody();
+      // Apply custom collision box if specified
+      if (p.collision) {
+        const col  = p.collision;
+        const w    = col.width  ?? img.displayWidth;
+        const h    = col.height ?? img.displayHeight;
+        const ox   = (img.displayWidth  - w) / 2 + (col.offsetX ?? 0);
+        const oy   = (img.displayHeight - h)     + (col.offsetY ?? 0);
+        img.body.setSize(w, h);
+        img.body.setOffset(ox, oy);
+      }
       return img;
     }
     const img = this.scene.add.image(p.x, p.y, p.type).setOrigin(0.5, 1);

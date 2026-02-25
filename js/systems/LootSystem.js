@@ -26,6 +26,10 @@ export default class LootSystem {
         c.isHideoutChest = true;
         c.searched       = false;   // always interactable
       }
+      if (def.isUpgradeStation) {
+        c.isUpgradeStation = true;
+        c.searched         = false;  // always interactable
+      }
       this.containers.push(c);
     });
   }
@@ -43,7 +47,7 @@ export default class LootSystem {
 
     // Check containers
     for (const c of this.containers) {
-      if (c.searched && !c.isHideoutChest) continue;
+      if (c.searched && !c.isHideoutChest && !c.isUpgradeStation) continue;
       const d = Phaser.Math.Distance.Between(player.x, player.y, c.x, c.y);
       if (d < bestDist) { bestDist = d; best = c; }
     }
@@ -68,7 +72,7 @@ export default class LootSystem {
   /** Reset all containers for a world reset cycle. */
   resetContainers() {
     this.containers.forEach(c => {
-      if (c.isHideoutChest) return;   // chest content managed by HideoutChestScene
+      if (c.isHideoutChest || c.isUpgradeStation) return;  // always interactable
       c.searched  = false;
       c.lootItems = [];
     });

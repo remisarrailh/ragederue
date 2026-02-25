@@ -3,32 +3,63 @@
 /**
  * levelConfigs.js — Server-side level configuration.
  *
- * Mirrors the per-level settings from js/config/levels/*.js but in CommonJS
- * format (the client files use ES modules which Node can't require() directly).
- *
- * Only the server-relevant fields are included:
- *   containers          — loot container positions
- *   containerLootTable  — weighted loot table for containers
- *   corpseLootTable     — weighted loot table for enemy corpses
- *   containerItemCount  — {min, max} items per container
- *   corpseItemCount     — {min, max} items per corpse
- *   enemies             — WaveSpawner config (see WaveSpawner.js for all fields)
- *
- * All fields are optional — Room and WaveSpawner fall back to hardcoded defaults.
+ * Les containers sont lus dynamiquement depuis js/config/levels/<id>.js
+ * afin d'être toujours synchronisés avec ce que l'éditeur a sauvegardé.
+ * Les loot tables sont lues depuis js/config/lootTable.js via vm.
  */
+
+const fs   = require('fs');
+const path = require('path');
+const vm   = require('vm');
+
+// ── Lecture dynamique des containers depuis le fichier de niveau client ───────
+function _readLevelContainers(levelId) {
+  try {
+    const levelPath = path.join(__dirname, '..', 'js', 'config', 'levels', `${levelId}.js`);
+    const src = fs.readFileSync(levelPath, 'utf8')
+      .replace(/^export\s+default\s+/m, 'var _level = ');
+    const ctx = {};
+    vm.runInNewContext(src, ctx);
+    // Exclure les containers spéciaux (coffre planque, établi) — gérés séparément
+    const containers = (ctx._level?.containers ?? [])
+      .filter(c => !c.isHideoutChest && !c.isUpgradeStation);
+    console.log(`[levelConfigs] ${levelId}: ${containers.length} containers lus depuis le fichier niveau`);
+    return containers;
+  } catch (e) {
+    console.warn(`[levelConfigs] Impossible de lire les containers de ${levelId} :`, e.message);
+    return [];
+  }
+}
+
+// ── Lecture dynamique de lootTable.js ────────────────────────────────────────
+function _readLootConfig() {
+  try {
+    const lootPath = path.join(__dirname, '..', 'js', 'config', 'lootTable.js');
+    const src = fs.readFileSync(lootPath, 'utf8');
+    const cleaned = src
+      .replace(/^export\s+const\s+/gm, 'var ')
+      .replace(/^export\s+function\s+/gm, 'function ');
+    const ctx = {};
+    vm.runInNewContext(cleaned, ctx);
+    return {
+      containerLootTables: ctx.CONTAINER_LOOT_TABLES ?? { default: [] },
+      containerItemCounts: ctx.CONTAINER_ITEM_COUNTS ?? { default: { min: 1, max: 3 } },
+      enemyLootTables:     ctx.ENEMY_LOOT_TABLES     ?? { default: [] },
+      enemyItemCounts:     ctx.ENEMY_ITEM_COUNTS      ?? { default: { min: 0, max: 2 } },
+    };
+  } catch (e) {
+    console.warn('[levelConfigs] Impossible de lire lootTable.js :', e.message);
+    return {};
+  }
+}
+
+const LOOT = _readLootConfig();
 
 const LEVEL_CONFIGS = {
 
   // ── level_01 — Street Shops ─────────────────────────────────────────────
   level_01: {
-    containers: [
-      { x: 371,  y: 410, texture: 'barrel' },
-      { x: 780,  y: 450, texture: 'barrel' },
-      { x: 1200, y: 390, texture: 'barrel' },
-      { x: 1700, y: 455, texture: 'barrel' },
-      { x: 2350, y: 395, texture: 'barrel' },
-      { x: 3100, y: 445, texture: 'barrel' },
-    ],
+    containers: _readLevelContainers('level_01'),
     enemies: {
       waveIntervalMs: 30_000,
       waveMin:        1,
@@ -39,27 +70,15 @@ const LEVEL_CONFIGS = {
       strongHp:       100,
       strongSpeed:    70,
     },
-    containerLootTable: [
-      { type: 'ethereum',     weight: 15 },
-      { type: 'sushi',        weight: 30 },
-      { type: 'pizza',        weight: 20 },
-      { type: 'ice_cream',    weight: 25 },
-      { type: 'water_bottle', weight: 10 },
-    ],
-    corpseLootTable: [
-      { type: 'ethereum',     weight: 40 },
-      { type: 'sushi',        weight: 25 },
-      { type: 'ice_cream',    weight: 20 },
-      { type: 'pizza',        weight: 10 },
-      { type: 'water_bottle', weight: 5  },
-    ],
-    containerItemCount: { min: 1, max: 3 },
-    corpseItemCount:    { min: 1, max: 2 },
+    containerLootTables: LOOT.containerLootTables,
+    containerItemCounts: LOOT.containerItemCounts,
+    enemyLootTables:     LOOT.enemyLootTables,
+    enemyItemCounts:     LOOT.enemyItemCounts,
   },
 
   // ── level_02 — Bar ──────────────────────────────────────────────────────
   level_02: {
-    containers: [],   // no containers in the bar
+    containers: _readLevelContainers('level_02'),
     enemies: {
       waveIntervalMs: 20_000,
       waveMin:        2,
@@ -70,26 +89,16 @@ const LEVEL_CONFIGS = {
       strongHp:       120,
       strongSpeed:    80,
     },
-    containerLootTable: [
-      { type: 'ethereum',  weight: 30 },
-      { type: 'sushi',     weight: 25 },
-      { type: 'pizza',     weight: 25 },
-      { type: 'ice_cream', weight: 20 },
-    ],
-    corpseLootTable: [
-      { type: 'ethereum',  weight: 55 },
-      { type: 'sushi',     weight: 20 },
-      { type: 'ice_cream', weight: 15 },
-      { type: 'pizza',     weight: 10 },
-    ],
-    containerItemCount: { min: 2, max: 4 },
-    corpseItemCount:    { min: 1, max: 3 },
+    containerLootTables: LOOT.containerLootTables,
+    containerItemCounts: LOOT.containerItemCounts,
+    enemyLootTables:     LOOT.enemyLootTables,
+    enemyItemCounts:     LOOT.enemyItemCounts,
   },
 
   // ── level_03 — Planque ──────────────────────────────────────────────────
   // Safe zone: no enemies, no random loot (chest is handled separately)
   level_03: {
-    containers: [],
+    containers: _readLevelContainers('level_03'),
     enemies: {
       maxEnemies:    0,
       waveIntervalMs: 999_999_999,  // effectively never

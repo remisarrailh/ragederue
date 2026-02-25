@@ -1,11 +1,18 @@
+
+
 # Assets
 
-* Bouteille d'eau
+* Bouteille d'eau XXX
 * Boisson canette
-* Vis
-* Clou
-* Planche en bois
-* Tuyau
+* Vis XXX
+* Clou XXX
+* Planche en bois XXX
+* Tuyau XXX
+* Atelier
+* Bandages
+* Attelles
+* Kit soin	
+* Boite à outils
 
 # Global
 
@@ -15,27 +22,26 @@
 
 * Tri des objets par type (soin/argent etc...)
 * Reset vie/autres dans la planque quand on rentre (elle devrait remonter doucement)
-* Les zones de collisions sont incorrectes (trop grande) ajouter une hitbox visible dans l'éditeur de niveau pour checker ça, Par exemple l'objet ne doit pas avoir une hitbox trop basique, sinon on ne peut pas passer au dessus et au dessous
+* Les zones de collisions sont incorrectes (trop grande) ajouter une hitbox visible dans l'éditeur de niveau pour checker ça, Par exemple l'objet ne doit pas avoir une hitbox trop basique, sinon on ne peut pas passer au dessus et au dessousXXX
+* Ennemi marche en marche arrière
+* Menu inventaire TAB pour ouvrir mais TAB aussi pour switch inventaire / xp
+* Bouton build dans amélioration bizarre (rouge puis vert quand on hover ?)
 
 
 
 # Warp
 
-* Un warp doit redirigé vers un autre warp d'un autre niveau , pas un niveau
-* mécanique à l'air partiellement implémenté mais pas claire (nommé zone\_xxxxxx au lieu du nom donné à la warp+niveau)
-* Elle n'a pas l'air de fonctionné
+# 
 
 # Compatibilité mobile
 
-Agrandir la fenetre inventaire/coffre sur mobile seulement
+Agrandir la fenetre inventaire/coffre sur mobile seulement XX
 
 # 
 
 # Correctif
 
-* Spawn des ennemis à revoir (pas forcément en adéquation selon la taille du niveau) ex: level1 les ennemis apparaissent au milieu du niveau et ils n'arrivent pas à se déplacer dans tout le niveau
-
-Les améliorations demandent des objets (vis/clous/tuyaux/etc...) et peuvent avoir 1 à 3 niveau
+* Pas de possibilité de tester les améliorations car les objets nécessaire de sont pas dans les conteneurs actuelles
 
 
 
@@ -45,11 +51,11 @@ Les améliorations demandent des objets (vis/clous/tuyaux/etc...) et peuvent avo
 
 # Amélioration de la planque
 
-* Cuisine : Augmente plus rapidement la barre de nourriture quand joueur dans la planque, permet de fabriquer des nourritures à partir d'autres nourritures
-* Filtration de l'eau : Augmente plus rapidement l'eau quand joueur dans la planque, permet de créer des bouteilles d'eau
-* Coffre : Permet de stocker plus d'objets
-* Gym : Permet d'augmenter des compétences
-* Atelier : Permet de fabriquer des armes
+* Cuisine : Augmente plus rapidement la barre de nourriture quand joueur dans la planque, permet de fabriquer des nourritures à partir d'autres nourrituresXX
+* Filtration de l'eau : Augmente plus rapidement l'eau quand joueur dans la planque, permet de créer des bouteilles d'eauXX
+* Coffre : Permet de stocker plus d'objetsXX
+* Gym : Permet d'augmenter des compétencesXX
+* Atelier : Permet de fabriquer des armesXX
 
 # Points d'expériences
 
@@ -80,14 +86,14 @@ Les améliorations demandent des objets (vis/clous/tuyaux/etc...) et peuvent avo
 
 # Jeu
 
-* Possibilité de revive un joueur qui est à terre
-* Possibilité de se soigner entre joueur
-* En cas de mort tout à 10% (pénalité en cas de mort)
+* Possibilité de revive un joueur qui est à terre XXX
+* Possibilité de se soigner entre joueur XXX
+* En cas de mort tout à 10% (pénalité en cas de mort) XXX
 
 # Serveur
 
-* Chaque level à sa génération des loots / ennemis (nombre défini par apport au conteneurs et nombre d'ennemis et type d'ennemis
-* Possibilités de paramétrer la fréquence d'apparition des ennemis - quantité par ennemis par niveau
+* Chaque level à sa génération des loots / ennemis (nombre défini par apport au conteneurs et nombre d'ennemis et type d'ennemis X
+* Possibilités de paramétrer la fréquence d'apparition des ennemis - quantité par ennemis par niveau X
 
 # Editeur de niveau
 
@@ -108,4 +114,3 @@ Container dans Props (container est maintenant un attribut / type de container c
 * Permet d'ajouter/supprimer des loots du jeu
 * Impossible de changer le nom d'un item et ces attributs
 * Impossible de changer la texture d'un item
-* Save dans la loot editor ne ramène pas à l'éditeur de niveau

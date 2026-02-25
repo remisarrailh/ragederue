@@ -1,8 +1,8 @@
 import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
 import { ITEM_DEFS } from '../config/lootTable.js';
 
-const CELL    = 48;   // cell size in px
-const GAP     = 2;
+const CELL    = IS_MOBILE ? 72 : 48;   // cell size in px
+const GAP     = IS_MOBILE ? 4  : 2;
 const COLS    = 6;
 const ROWS    = 4;
 const GRID_W  = COLS * (CELL + GAP) + GAP;
@@ -18,6 +18,8 @@ const SKILL_DEFS = [
   { key: 'kickSkill',  label: 'Pieds',   icon: '🦵', bonusLabel: 'dmg pieds' },
   { key: 'jabSkill',   label: 'Jab',     icon: '⚡',  bonusLabel: 'dmg jab' },
   { key: 'moveSkill',  label: 'Vitesse', icon: '🏃',  bonusLabel: 'vitesse' },
+  { key: 'runSkill',   label: 'Sprint',  icon: '💨',  bonusLabel: '+vitesse/-conso sprint' },
+  { key: 'jumpSkill',  label: 'Saut',    icon: '🦘',  bonusLabel: '+hauteur/-conso saut' },
   { key: 'lootSkill',  label: 'Loot',    icon: '📦',  bonusLabel: '-20ms/lv ident.' },
   { key: 'healSkill',  label: 'Soins',   icon: '💊',  bonusLabel: 'efficacité soins' },
   { key: 'eatSkill',   label: 'Manger',  icon: '🍕',  bonusLabel: 'efficacité nourriture' },

@@ -21,6 +21,8 @@ export const C_CHAR_SELECT   = 0x11;  // Select (action=0) or create (action=1) 
 export const C_CHAR_DELETE   = 0x12;  // Delete a character
 export const C_CHEST_SAVE    = 0x13;  // Save chest contents to server
 export const C_SKILL_GAIN    = 0x14;  // Notify server of XP gain for a skill
+export const C_UPGRADE_BUILD = 0x15;  // Build next level of a hideout upgrade
+export const C_REVIVE_PLAYER = 0x16;  // Revive a downed player (targetPlayerId)
 
 // Server → Client
 export const S_WELCOME       = 0x80;
@@ -36,6 +38,7 @@ export const S_CHAR_LIST      = 0x90;  // Character list response
 export const S_JOIN_REFUSED   = 0x91;  // Character already in-game
 export const S_CHEST_DATA     = 0x92;  // Chest contents after character selection
 export const S_SKILLS         = 0x93;  // Full skill state for the selected character
+export const S_UPGRADES       = 0x94;  // Hideout upgrade levels for the selected character
 
 // ─── Item types (shared with server) ────────────────────────────────────────
 export const ITEM_TYPES = ['ethereum', 'sushi', 'pizza', 'ice_cream'];
@@ -396,6 +399,57 @@ export function decodeSkills(buf) {
     skills[name] = dv.getUint32(off, false); off += 4;
   }
   return skills;
+}
+
+/** C_REVIVE_PLAYER: type(1) + targetPlayerId(u16) */
+export function encodeRevivePlayer(targetPlayerId) {
+  const buf = new ArrayBuffer(3);
+  const v = new DataView(buf);
+  v.setUint8(0, C_REVIVE_PLAYER);
+  v.setUint16(1, targetPlayerId, true);
+  return buf;
+}
+
+/** S_REVIVE_PLAYER: type(1) + targetPlayerId(u16) — broadcast to room */
+export const S_REVIVE_PLAYER = 0x95;
+export function encodeReviveMsg(targetPlayerId) {
+  const buf = new ArrayBuffer(3);
+  const v = new DataView(buf);
+  v.setUint8(0, S_REVIVE_PLAYER);
+  v.setUint16(1, targetPlayerId, true);
+  return buf;
+}
+export function decodeReviveMsg(buf) {
+  const v = new DataView(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
+  return { targetPlayerId: v.getUint16(1, true) };
+}
+
+/** C_UPGRADE_BUILD: type(1) + upgradeIdLen(u8) + upgradeId(N) */
+export function encodeUpgradeBuild(upgradeId) {
+  const nb  = new TextEncoder().encode(upgradeId);
+  const buf = new Uint8Array(2 + nb.length);
+  buf[0] = C_UPGRADE_BUILD;
+  buf[1] = nb.length;
+  buf.set(nb, 2);
+  return buf;
+}
+
+/**
+ * S_UPGRADES: type(1) + count(u8) + [idLen(u8)+id + level(u8)]*count
+ * Decodes to { [upgradeId]: level } object.
+ */
+export function decodeUpgrades(buf) {
+  const u8    = new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
+  const count = u8[1];
+  const dec   = new TextDecoder();
+  const upgrades = {};
+  let off = 2;
+  for (let i = 0; i < count; i++) {
+    const len = u8[off++];
+    const id  = dec.decode(u8.slice(off, off + len)); off += len;
+    upgrades[id] = u8[off++];
+  }
+  return upgrades;
 }
 
 /** S_CHEST_DATA: type(1) + count(u8) + [itemLen(u8) + item(N)]* */

@@ -79,8 +79,9 @@ class WaveSpawner {
       e.velX = 0;
       e.velY = 0;
       e.state = 'patrol';
-      e._patrolLeft  = e.x - 160;
-      e._patrolRight = e.x + 160;
+      const patrolRange = Math.min(320, Math.max(160, Math.round(spacing * 0.4)));
+      e._patrolLeft  = Math.max(40, e.x - patrolRange);
+      e._patrolRight = Math.min(this._cfg.mapWidth - 80, e.x + patrolRange);
       e._patrolDir   = Math.random() < 0.5 ? 1 : -1;
     }
   }
@@ -119,8 +120,11 @@ class WaveSpawner {
       }
       sx = Math.max(60, Math.min(mapWidth - 120, sx));
       const sy  = LANE_TOP + 10 + Math.floor(Math.random() * (LANE_BOTTOM - LANE_TOP - 20));
-      const cfg = Math.random() < strongChance ? { hp: strongHp, speed: strongSpeed } : {};
-      enemies.push(new ServerEnemy(this._getNextId(), sx, sy, cfg));
+      const isStrong = Math.random() < strongChance;
+      const enemyCfg = isStrong
+        ? { type: this._cfg.strongType ?? 'brute', hp: strongHp, speed: strongSpeed, mapWidth }
+        : { type: this._cfg.normalType ?? 'punk',  mapWidth };
+      enemies.push(new ServerEnemy(this._getNextId(), sx, sy, enemyCfg));
     }
   }
 }

@@ -84,15 +84,20 @@ function generateOneLevelJs(level) {
   }
   lines.push('  ],');
   lines.push('  containers: [');
-  for (const c of (level.containers ?? []))
-    lines.push(`    { x: ${c.x}, y: ${c.y}, texture: '${c.texture ?? 'barrel'}' },`);
+  for (const c of (level.containers ?? [])) {
+    const flags = (c.isHideoutChest   ? ', isHideoutChest: true'   : '') +
+                  (c.isUpgradeStation ? ', isUpgradeStation: true' : '') +
+                  (c.isToolbox        ? ', isToolbox: true'        : '');
+    lines.push(`    { x: ${c.x}, y: ${c.y}, texture: '${c.texture ?? 'barrel'}'${flags} },`);
+  }
   lines.push('  ],');
   lines.push('  transitZones: [');
   for (const z of (level.transitZones ?? [])) {
-    const tgt  = z.targetLevel ? `'${z.targetLevel}'` : 'null';
+    const tgt     = z.targetLevel  ? `'${z.targetLevel}'`  : 'null';
+    const twarpId = z.targetWarpId ? `'${z.targetWarpId}'` : 'null';
     const yStr = (z.y      != null) ? `, y: ${z.y}` : '';
     const hStr = (z.height != null) ? `, height: ${z.height}` : '';
-    lines.push(`    { id: '${z.id}', type: '${z.type}', x: ${z.x}${yStr}, width: ${z.width ?? 120}${hStr}, targetLevel: ${tgt}, label: '${z.label ?? ''}' },`);
+    lines.push(`    { id: '${z.id}', type: '${z.type}', x: ${z.x}${yStr}, width: ${z.width ?? 120}${hStr}, targetLevel: ${tgt}, targetWarpId: ${twarpId}, label: '${z.label ?? ''}' },`);
   }
   lines.push('  ],');
   lines.push('};');
@@ -160,25 +165,47 @@ function saveLevels(rawLevels) {
 
 function readLootTable() {
   const src = fs.readFileSync(LOOT_PATH, 'utf8');
-  // Strip ES module syntax so vm.runInNewContext can execute the code
   const cleaned = src
     .replace(/^export\s+const\s+/gm, 'var ')
     .replace(/^export\s+function\s+/gm, 'function ');
   const ctx = {};
   vm.runInNewContext(cleaned, ctx);
   return {
-    items:              ctx.ITEM_DEFS              ?? {},
-    containerTable:     ctx.CONTAINER_LOOT_TABLE   ?? [],
-    corpseTable:        ctx.CORPSE_LOOT_TABLE       ?? [],
-    containerItemCount: ctx.CONTAINER_ITEM_COUNT   ?? { min: 1, max: 3 },
-    corpseItemCount:    ctx.CORPSE_ITEM_COUNT       ?? { min: 0, max: 2 },
+    items:               ctx.ITEM_DEFS              ?? {},
+    containerLootTables: ctx.CONTAINER_LOOT_TABLES  ?? { default: [] },
+    containerItemCounts: ctx.CONTAINER_ITEM_COUNTS  ?? { default: { min: 1, max: 3 } },
+    enemyLootTables:     ctx.ENEMY_LOOT_TABLES      ?? { default: [] },
+    enemyItemCounts:     ctx.ENEMY_ITEM_COUNTS       ?? { default: { min: 0, max: 2 } },
   };
 }
 
 function generateLootTableJs(data) {
-  const { items, containerTable, corpseTable, containerItemCount, corpseItemCount } = data;
+  const { items, containerLootTables, containerItemCounts, enemyLootTables, enemyItemCounts } = data;
   const lines = [];
   const L = (s = '') => lines.push(s);
+
+  // Helper pour générer une map de tables
+  const writeTableMap = (exportName, map, comment) => {
+    L(`// ${comment}`);
+    L(`export const ${exportName} = {`);
+    for (const [typeKey, table] of Object.entries(map ?? {})) {
+      L(`  ${typeKey}: [`);
+      for (const e of (table ?? []))
+        L(`    { type: '${e.type}', weight: ${e.weight} },`);
+      L(`  ],`);
+    }
+    L('};');
+    L();
+  };
+
+  const writeCountMap = (exportName, map, comment) => {
+    L(`// ${comment}`);
+    L(`export const ${exportName} = {`);
+    for (const [typeKey, cnt] of Object.entries(map ?? {}))
+      L(`  ${typeKey}: { min: ${cnt.min ?? 0}, max: ${cnt.max ?? 1} },`);
+    L('};');
+    L();
+  };
 
   L('// ── Item definitions for the extraction-shooter inventory system ───────────');
   L('// Each item has:');
@@ -197,6 +224,7 @@ function generateLootTableJs(data) {
   for (const [key, it] of Object.entries(items)) {
     L(`  ${key}: {`);
     L(`    texture:     '${it.texture}',`);
+    if (it.category) L(`    category:    '${it.category}',`);
     L(`    invW: ${it.invW ?? 1}, invH: ${it.invH ?? 1},`);
     L(`    useTime:     ${it.useTime ?? 0},`);
     L(`    healAmount:  ${it.healAmount ?? 0},`);
@@ -212,24 +240,16 @@ function generateLootTableJs(data) {
   }
   L('};');
   L();
-  L('// ── Loot tables for containers and enemy corpses ──────────────────────────');
-  L('// Each entry: { type, weight }  — weight is relative probability');
-  L('export const CONTAINER_LOOT_TABLE = [');
-  for (const e of (containerTable ?? []))
-    L(`  { type: '${e.type}', weight: ${e.weight} },`);
-  L('];');
-  L();
-  L('export const CORPSE_LOOT_TABLE = [');
-  for (const e of (corpseTable ?? []))
-    L(`  { type: '${e.type}', weight: ${e.weight} },`);
-  L('];');
-  L();
-  L('// How many items a container / corpse can hold (random between min–max)');
-  const cic  = containerItemCount ?? { min: 1, max: 3 };
-  const coic = corpseItemCount    ?? { min: 0, max: 2 };
-  L(`export const CONTAINER_ITEM_COUNT = { min: ${cic.min},  max: ${cic.max} };`);
-  L(`export const CORPSE_ITEM_COUNT   = { min: ${coic.min}, max: ${coic.max} };`);
-  L();
+
+  writeTableMap('CONTAINER_LOOT_TABLES', containerLootTables,
+    '── Loot tables par type de container (clé = texture) ──────────────────────────');
+  writeCountMap('CONTAINER_ITEM_COUNTS', containerItemCounts,
+    '── Nombre d\'items par type de container ─────────────────────────────────────');
+  writeTableMap('ENEMY_LOOT_TABLES', enemyLootTables,
+    '── Loot tables par type d\'ennemi (clé = type) ───────────────────────────────');
+  writeCountMap('ENEMY_ITEM_COUNTS', enemyItemCounts,
+    '── Nombre d\'items par type d\'ennemi ─────────────────────────────────────────');
+
   L('// ── Search timing ─────────────────────────────────────────────────────────');
   L('export const SEARCH_OPEN_MS       = 800;   // time to open a container/body');
   L('export const SEARCH_IDENTIFY_MS   = 600;   // time to identify each item inside');

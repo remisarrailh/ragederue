@@ -15,6 +15,8 @@ const C_CHAR_SELECT   = 0x11;  // C→S : sélectionne (action=0) ou crée (acti
 const C_CHAR_DELETE   = 0x12;  // C→S : supprime un personnage
 const C_CHEST_SAVE    = 0x13;  // C→S : sauvegarde le contenu du coffre
 const C_SKILL_GAIN    = 0x14;  // C→S : XP gagné pour une compétence
+const C_UPGRADE_BUILD = 0x15;  // C→S : construire prochain niveau d'une amélioration
+const C_REVIVE_PLAYER = 0x16;  // C→S : revive un joueur à terre (targetPlayerId u16)
 
 const S_WELCOME       = 0x80;
 const S_ROOM_SNAPSHOT = 0x81;
@@ -29,6 +31,8 @@ const S_CHAR_LIST      = 0x90;  // S→C : liste des personnages
 const S_JOIN_REFUSED   = 0x91;  // S→C : personnage déjà en jeu
 const S_CHEST_DATA     = 0x92;  // S→C : contenu du coffre du personnage sélectionné
 const S_SKILLS         = 0x93;  // S→C : état complet des compétences du personnage
+const S_UPGRADES       = 0x94;  // S→C : niveaux des améliorations de la planque
+const S_REVIVE_PLAYER  = 0x95;  // S→C : broadcast revive (targetPlayerId u16)
 
 // ─── Item types (shared with client) ────────────────────────────────────────
 const ITEM_TYPES = ['ethereum', 'sushi', 'pizza', 'ice_cream'];
@@ -331,18 +335,72 @@ function encodeSkills(skills) {
   return buf;
 }
 
+// ─── Upgrade messages ────────────────────────────────────────────────────────
+
+/**
+ * C_UPGRADE_BUILD: type(1) + upgradeIdLen(u8) + upgradeId(N)
+ */
+function decodeUpgradeBuild(buf) {
+  const len       = buf[1];
+  const upgradeId = buf.slice(2, 2 + len).toString('utf8');
+  return { upgradeId };
+}
+
+/**
+ * S_UPGRADES: type(1) + count(u8) + [idLen(u8)+id + level(u8)]*count
+ * @param {{ [id: string]: number }} upgrades
+ */
+function encodeUpgrades(upgrades) {
+  const entries = Object.entries(upgrades);
+  const parts   = entries.map(([k, v]) => ({ kb: Buffer.from(k, 'utf8'), level: v }));
+  const size    = 2 + parts.reduce((s, p) => s + 1 + p.kb.length + 1, 0);
+  const buf     = Buffer.alloc(size);
+  buf[0] = S_UPGRADES;
+  buf[1] = entries.length;
+  let off = 2;
+  for (const { kb, level } of parts) {
+    buf[off++] = kb.length;
+    kb.copy(buf, off); off += kb.length;
+    buf[off++] = level;
+  }
+  return buf;
+}
+
+// ─── Revive messages ────────────────────────────────────────────────────────
+
+/**
+ * C_REVIVE_PLAYER: type(1) + targetPlayerId(u16)
+ */
+function decodeRevivePlayer(buf) {
+  return { targetPlayerId: buf.readUInt16LE(1) };
+}
+
+/**
+ * S_REVIVE_PLAYER: type(1) + targetPlayerId(u16)
+ * Broadcast to everyone in the room so the target client can call player.revive().
+ */
+function encodeReviveMsg(targetPlayerId) {
+  const buf = Buffer.alloc(3);
+  buf[0] = S_REVIVE_PLAYER;
+  buf.writeUInt16LE(targetPlayerId, 1);
+  return buf;
+}
+
 // ─── Exports ────────────────────────────────────────────────────────────────
 module.exports = {
   C_JOIN, C_PLAYER_STATE, C_ATTACK, C_CHANGE_MAP, C_HIT_ENEMY, C_TAKE_ITEM,
-  C_CHAR_LIST, C_CHAR_SELECT, C_CHAR_DELETE, C_CHEST_SAVE, C_SKILL_GAIN,
+  C_CHAR_LIST, C_CHAR_SELECT, C_CHAR_DELETE, C_CHEST_SAVE, C_SKILL_GAIN, C_UPGRADE_BUILD,
+  C_REVIVE_PLAYER,
   S_WELCOME, S_ROOM_SNAPSHOT, S_PLAYER_JOIN, S_PLAYER_LEAVE, S_DAMAGE,
   S_ENEMY_SNAPSHOT, S_LOOT_DATA, S_WORLD_RESET, S_TIMER_SYNC,
-  S_CHAR_LIST, S_JOIN_REFUSED, S_CHEST_DATA, S_SKILLS,
+  S_CHAR_LIST, S_JOIN_REFUSED, S_CHEST_DATA, S_SKILLS, S_UPGRADES, S_REVIVE_PLAYER,
   STATES, stateToIdx, ENEMY_STATES, enemyStateToIdx,
   ITEM_TYPES, itemTypeToIdx,
   decodeJoin, decodePlayerState, decodeHitEnemy, decodeTakeItem,
-  decodeCharSelect, decodeCharDelete, decodeChestSave, decodeSkillGain,
+  decodeCharSelect, decodeCharDelete, decodeChestSave, decodeSkillGain, decodeUpgradeBuild,
+  decodeRevivePlayer,
   encodeWelcome, encodeRoomSnapshot, encodePlayerJoin, encodePlayerLeave,
   encodeEnemySnapshot, encodeLootData, encodeWorldReset, encodeTimerSync,
-  encodeCharList, encodeJoinRefused, encodeChestData, encodeSkills,
+  encodeCharList, encodeJoinRefused, encodeChestData, encodeSkills, encodeUpgrades,
+  encodeReviveMsg,
 };

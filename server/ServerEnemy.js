@@ -15,7 +15,7 @@ const ENEMY_HITSTUN_MS           = 220;
 const ENEMY_KNOCKDOWN_RECOVERY_MS = 900;
 const ENEMY_ATTACK_COOLDOWN_MS   = 2200;
 const ENEMY_ATTACK_DURATION_MS   = 600;
-const EXTRACT_X  = 3500;
+const DEFAULT_MAP_WIDTH  = 3500;
 
 class ServerEnemy {
   /**
@@ -28,6 +28,12 @@ class ServerEnemy {
     this.netId = netId;
     this.x = x;
     this.y = y;
+
+    // World bounds (per-level)
+    this._mapWidth = cfg.mapWidth ?? DEFAULT_MAP_WIDTH;
+
+    // Type (used for loot table dispatch)
+    this.type = cfg.type ?? 'punk';
 
     // Stats
     this.hp       = cfg.hp    ?? ENEMY_MAX_HP;
@@ -138,8 +144,8 @@ class ServerEnemy {
 
     // Clamp to lane
     this.y = Math.max(LANE_TOP, Math.min(LANE_BOTTOM, this.y));
-    // Clamp to world (stay away from extraction zone)
-    this.x = Math.max(40, Math.min(EXTRACT_X - 80, this.x));
+    // Clamp to world bounds
+    this.x = Math.max(40, Math.min(this._mapWidth - 80, this.x));
   }
 
   /**

@@ -12,6 +12,6 @@ export default {
   containers: [
   ],
   transitZones: [
-    { id: 'zone_extract', type: 'extract', x: 3640, y: 300, width: 120, height: 200, targetLevel: null, label: 'EXTRACT' },
+    { id: 'zone_extract', type: 'extract', x: 3640, y: 300, width: 120, height: 200, targetLevel: null, targetWarpId: null, label: 'EXTRACT' },
   ],
 };

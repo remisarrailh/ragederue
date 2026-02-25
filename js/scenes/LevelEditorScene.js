@@ -36,8 +36,11 @@ const TOOLS = [
   { id: 'prop:banner-hor1', label: '  banner1',  color: '#cccccc', scale: 0.6  },
   { id: 'prop:banner-hor2', label: '  banner2',  color: '#cccccc', scale: 0.6  },
   { id: 'prop:fore',        label: '  fore',     color: '#ffaa44', scale: 1.2  },
-  { id: 'sep_loot',         label: '─ LOOT ─',   color: '#555555', sep: true },
-  { id: 'container',        label: '  container',color: '#88ff88' },
+  { id: 'sep_loot',              label: '─ LOOT ─',      color: '#555555', sep: true },
+  { id: 'container:barrel',        label: '  barrel',      color: '#88ff88' },
+  { id: 'container:toolbox',       label: '  toolbox',     color: '#44ddff' },
+  { id: 'container:coffrePlanque', label: '  coffre',      color: '#ffdd66' },
+  { id: 'container:workbench',     label: '  workbench',   color: '#ff9944' },
   { id: 'sep_zones',        label: '─ ZONES ─',  color: '#555555', sep: true },
   { id: 'transit',          label: '  transit',  color: '#00ccff' },
 ];
@@ -72,14 +75,17 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._exportOverlay       = null;
     this._lootOverlay         = null;   // persistent overlay objects []
     this._lootContentObjs     = [];    // rebuilt on tab switch
-    this._lootData            = null;  // { items, containerTable, corpseTable, … }
+    this._lootData            = null;  // { items, containerLootTables, containerItemCounts, enemyLootTables, enemyItemCounts }
     this._lootTab             = 'tables';
+    this._lootSelectedType    = null;  // { kind: 'container'|'enemy', key: string }
     this._selRect             = null;
     this._availableBackgrounds = [null, ...BACKGROUND_KEYS]; // null = aucun fond
     this._dragActive     = false;
     this._dragOrigin     = null;   // { px, py } screen coords at mousedown
     this._resizeMode     = null;   // null | 'width' | 'height' (transit zones)
     this._zoom           = 1.0;   // zoom caméra [0.25 .. 2.0]
+    this._showHitboxes   = false;  // H key toggle
+    this._hitboxGraphics = [];     // Graphics objects for all-props hitbox overlay
 
     // Layers Phaser : layer.add() retire l'objet de la DisplayList principale
     // → chaque caméra ne voit que son propre layer
@@ -163,15 +169,16 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._buildListPanel();
 
     // Hint scroll
-    ui(this.add.text(PAL_W + 4, GAME_H - PROP_H - 14, 'A/D : scroll   molette / +- : zoom   0 : reset zoom   DEL : supprimer', {
+    ui(this.add.text(PAL_W + 4, GAME_H - PROP_H - 14, 'A/D : scroll   molette / +- : zoom   0 : reset zoom   DEL : supprimer   H : hitboxes', {
       fontFamily: 'monospace', fontSize: '9px', color: '#333355',
     }).setDepth(601));
   }
 
   _buildToolbar() {
     const y = TOOL_H / 2;
-    this._uiBtn(10, y, '[ MENU ]', '#888888', () => this.scene.start('TitleScene'), 0, 0.5);
-    this._uiBtn(150, y, '◄', '#ff6600', () => this._prevLevel(), 0.5, 0.5);
+    this._toolbarBtns = [];
+    this._toolbarBtns.push(this._uiBtn(10, y, '[ MENU ]', '#888888', () => { if (this._lootOverlay) return; this.scene.start('TitleScene'); }, 0, 0.5));
+    this._toolbarBtns.push(this._uiBtn(150, y, '◄', '#ff6600', () => { if (this._lootOverlay) return; this._prevLevel(); }, 0.5, 0.5));
 
     // Le nom du niveau est cliquable pour le renommer
     this._levelNameText = this.add.text(310, y, '', {
@@ -181,12 +188,13 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._levelNameText.on('pointerdown', () => { if (!this._capturingInput) this._startRename(); });
     this._levelNameText.on('pointerover', () => { if (!this._capturingInput) this._levelNameText.setColor('#ffcc00'); });
     this._levelNameText.on('pointerout',  () => { if (!this._capturingInput) this._levelNameText.setColor('#ffffff'); });
+    this._toolbarBtns.push(this._levelNameText);
 
-    this._uiBtn(470, y, '►', '#ff6600', () => this._nextLevel(), 0.5, 0.5);
-    this._uiBtn(510, y, '[ +NEW ]', '#ffcc00', () => this._newLevel(), 0, 0.5);
-    this._uiBtn(580, y, '[ SAVE ]', '#ffcc00', () => this._saveToServer(), 0, 0.5);
-    this._uiBtn(648, y, '[ TEST ]', '#00ff88', () => this._testLevel(),    0, 0.5);
-    this._uiBtn(716, y, '[ EXPORT ]','#4488ff', () => this._showExport(),  0, 0.5);
+    this._toolbarBtns.push(this._uiBtn(470, y, '►', '#ff6600', () => { if (this._lootOverlay) return; this._nextLevel(); }, 0.5, 0.5));
+    this._toolbarBtns.push(this._uiBtn(510, y, '[ +NEW ]', '#ffcc00', () => { if (this._lootOverlay) return; this._newLevel(); }, 0, 0.5));
+    this._toolbarBtns.push(this._uiBtn(580, y, '[ SAVE ]', '#ffcc00', () => { if (this._lootOverlay) return; this._saveToServer(); }, 0, 0.5));
+    this._toolbarBtns.push(this._uiBtn(648, y, '[ TEST ]', '#00ff88', () => { if (this._lootOverlay) return; this._testLevel(); },    0, 0.5));
+    this._toolbarBtns.push(this._uiBtn(716, y, '[ EXPORT ]','#4488ff', () => { if (this._lootOverlay) return; this._showExport(); },  0, 0.5));
 
     this._zoomLabel = this.add.text(GAME_W - LIST_W - 8, y, '100%', {
       fontFamily: 'monospace', fontSize: '10px', color: '#556677',
@@ -257,6 +265,18 @@ export default class LevelEditorScene extends Phaser.Scene {
 
     this._btnBlockEnemy = this._uiBtn(x0 + 340, py, '[□ enemy]', '#555555', () => this._toggleBlocksEnemy(), 0, 0.5);
     this._btnBlockEnemy.setVisible(false);
+
+    // ── Toggles container spéciaux ────────────────────────────────────
+    this._btnHideoutChest   = this._uiBtn(x0 + 180, py, '[□ coffre]',    '#555555', () => this._toggleContainerFlag('isHideoutChest'), 0, 0.5);
+    this._btnHideoutChest.setVisible(false);
+    this._btnUpgradeStation = this._uiBtn(x0 + 270, py, '[□ upgrade]',   '#555555', () => this._toggleContainerFlag('isUpgradeStation'), 0, 0.5);
+    this._btnUpgradeStation.setVisible(false);
+
+    // ── Collision box fields (col.w / col.h / col.ox / col.oy) ───────
+    this._fieldColW  = this._makeCollisionField(x0 + 420, py, 'col.w',  'width');
+    this._fieldColH  = this._makeCollisionField(x0 + 490, py, 'col.h',  'height');
+    this._fieldColOX = this._makeCollisionField(x0 + 560, py, 'col.ox', 'offsetX');
+    this._fieldColOY = this._makeCollisionField(x0 + 630, py, 'col.oy', 'offsetY');
 
     this._lblTarget = this.add.text(x0 + 440, py, '', {
       fontFamily: 'monospace', fontSize: '10px', color: '#aaaaaa',
@@ -344,6 +364,28 @@ export default class LevelEditorScene extends Phaser.Scene {
     return { lbl, val };
   }
 
+  /** Edit field for collision sub-properties (collision.width, .height, .offsetX, .offsetY) */
+  _makeCollisionField(x, y, label, colProp) {
+    const lbl = this.add.text(x, y - 7, label + ':', {
+      fontFamily: 'monospace', fontSize: '9px', color: '#004466',
+    }).setOrigin(0, 0.5).setDepth(700).setVisible(false);
+    this._uiLayer.add(lbl);
+
+    const val = this.add.text(x, y + 6, '---', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#44bbcc',
+    }).setOrigin(0, 0.5).setDepth(700).setVisible(false)
+      .setInteractive({ useHandCursor: true });
+    this._uiLayer.add(val);
+
+    val.on('pointerdown', () => {
+      if (this._selected) this._startCollisionInput(this._selected.obj, colProp, val);
+    });
+    val.on('pointerover', () => val.setColor('#ffffff'));
+    val.on('pointerout',  () => { if (this._inputTarget?.textObj !== val) val.setColor('#44bbcc'); });
+
+    return { lbl, val, colProp };
+  }
+
   _makeLevelField(x, y, path, label) {
     const lbl = this.add.text(x, y - 7, label + ':', {
       fontFamily: 'monospace', fontSize: '9px', color: '#445566',
@@ -383,6 +425,7 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._worldObjects = [];
     for (const g of this._bgGraphics) g.destroy();
     this._bgGraphics = [];
+    this._clearHitboxOverlay();
     this._deselect();
     this._camScrollX = 0;
     this.cameras.main.setScroll(0, this._camScrollY());
@@ -397,6 +440,7 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._updatePropsPanel();
     this._updatePaletteHighlight();
     this._updateListPanel();
+    if (this._showHitboxes) this._rebuildHitboxOverlay();
   }
 
   /** Reconstruit uniquement le fond (grille, guides) sans toucher aux objets monde. */
@@ -501,8 +545,13 @@ export default class LevelEditorScene extends Phaser.Scene {
   }
 
   _spawnContainerSprite(data) {
-    const sprite = this.add.image(data.x, data.y, 'barrel')
-      .setOrigin(0.5, 1).setScale(1.0).setDepth(data.y + 10).setTint(0x88ff88);
+    const tex   = data.texture ?? 'barrel';
+    const tint  = data.isHideoutChest     ? 0xffdd66
+                : data.isUpgradeStation  ? 0xff9944
+                : data.texture === 'toolbox' ? 0x44ddff
+                : 0x88ff88;
+    const sprite = this.add.image(data.x, data.y, tex)
+      .setOrigin(0.5, 1).setScale(1.0).setDepth(data.y + 10).setTint(tint);
     this._worldLayer.add(sprite);
     const wo = { data, sprite, type: 'container' };
     this._worldObjects.push(wo);
@@ -551,9 +600,12 @@ export default class LevelEditorScene extends Phaser.Scene {
   }
 
   _transitLabel(data) {
-    return data.type === 'warp'
-      ? `► ${data.targetLevel ?? 'WARP'}`
-      : `▼ ${data.label ?? 'EXTRACT'}`;
+    if (data.type !== 'warp') return `▼ ${data.label ?? 'EXTRACT'}`;
+    const tgtLevel = this._levels?.find(l => l.id === data.targetLevel);
+    if (!tgtLevel) return `► ${data.label ?? 'WARP'}`;
+    const tgtWarp  = (tgtLevel.transitZones ?? []).find(z => z.type === 'warp' && z.id === data.targetWarpId);
+    const warpName = tgtWarp ? (tgtWarp.label ?? tgtWarp.id) : '?';
+    return `► ${tgtLevel.name} / ${warpName}`;
   }
 
   _destroyWO(wo) {
@@ -646,6 +698,23 @@ export default class LevelEditorScene extends Phaser.Scene {
       // Green square: bottom-right corner = uniform scale (applies to all props of same type)
       this._selRect.fillStyle(0x00ff88, 1);
       this._selRect.fillRect(rx + rw - 2, ry + rh - 2, 10, 10);
+
+      // Cyan rectangle: actual collision bounds (for blocksPlayer props)
+      if (wo.data.blocksPlayer && wo.sprite) {
+        const col  = wo.data.collision ?? {};
+        const s    = wo.sprite;
+        const dw   = s.displayWidth;
+        const dh   = s.displayHeight;
+        const cw   = col.width   ?? dw;
+        const ch   = col.height  ?? dh;
+        const cox  = (dw - cw) / 2 + (col.offsetX ?? 0);
+        const coy  = (dh - ch)     + (col.offsetY ?? 0);
+        // body offset is relative to top-left of sprite; origin is (0.5,1) so top-left = (x - dw/2, y - dh)
+        const bx   = s.x - dw / 2 + cox;
+        const by   = s.y - dh     + coy;
+        this._selRect.lineStyle(2, 0x00ccff, 0.9);
+        this._selRect.strokeRect(bx, by, cw, ch);
+      }
     }
   }
 
@@ -846,8 +915,11 @@ export default class LevelEditorScene extends Phaser.Scene {
       return;
     }
 
-    if (this._activeTool === 'container') {
-      const entry = { x: wx, y: wy, texture: 'barrel' };
+    if (this._activeTool.startsWith('container:')) {
+      const tex = this._activeTool.slice('container:'.length);
+      const entry = { x: wx, y: wy, texture: tex };
+      if (tex === 'coffrePlanque') entry.isHideoutChest   = true;
+      if (tex === 'workbench')     entry.isUpgradeStation = true;
       level.containers.push(entry);
       const wo = this._spawnContainerSprite(entry);
       if (wo) { this._selectObject(wo); this._dragOrigin = null; }
@@ -938,8 +1010,21 @@ export default class LevelEditorScene extends Phaser.Scene {
   _woShortLabel(wo) {
     const x = wo.data.x;
     const y = wo.data.y;
-    if (wo.type === 'transit')   return `[T] ${wo.data.type} x${x}`;
-    if (wo.type === 'container') return `[C] x${x} y${y}`;
+    if (wo.type === 'transit') {
+      if (wo.data.type === 'extract') return `[T] extract x${x}`;
+      const tgtLevel = this._levels.find(l => l.id === wo.data.targetLevel);
+      const tgtWarp  = tgtLevel
+        ? (tgtLevel.transitZones ?? []).find(z => z.type === 'warp' && z.id === wo.data.targetWarpId)
+        : null;
+      const dest = tgtLevel
+        ? `${tgtLevel.name}/${tgtWarp ? (tgtWarp.label ?? tgtWarp.id) : '?'}`
+        : '(none)';
+      return `[W] ${wo.data.label ?? 'warp'} → ${dest}`;
+    }
+    if (wo.type === 'container') {
+      const flag = wo.data.isHideoutChest ? ' ★coffre' : wo.data.isUpgradeStation ? ' ★upgrade' : '';
+      return `[C] ${wo.data.texture ?? 'barrel'}${flag} x${x}`;
+    }
     const blockMark = (wo.data.blocksPlayer ? '■' : '') + (wo.data.blocksEnemy ? 'E' : '');
     return `[P] ${wo.data.type} x${x} ${blockMark}`.trimEnd();
   }
@@ -959,7 +1044,8 @@ export default class LevelEditorScene extends Phaser.Scene {
     for (const f of [this._fieldX, this._fieldY, this._fieldScale,
                      this._fieldBg, this._fieldMid, this._fieldWW,
                      this._fieldLaneTop, this._fieldLaneBot, this._fieldSpawnX,
-                     this._fieldWidth, this._fieldHeight, this._fieldLabel]) {
+                     this._fieldWidth, this._fieldHeight, this._fieldLabel,
+                     this._fieldColW, this._fieldColH, this._fieldColOX, this._fieldColOY]) {
       f.lbl.setVisible(false); f.val.setVisible(false);
     }
     this._lblTarget.setVisible(false);
@@ -973,6 +1059,8 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._btnBgR.setVisible(false);
     this._btnBlock.setVisible(false);
     this._btnBlockEnemy.setVisible(false);
+    this._btnHideoutChest.setVisible(false);
+    this._btnUpgradeStation.setVisible(false);
 
     if (!wo) {
       // Aucun objet sélectionné → afficher les propriétés du niveau courant
@@ -1011,13 +1099,30 @@ export default class LevelEditorScene extends Phaser.Scene {
       this._showField(this._fieldWidth,  x0 + 180, py, 'width',  wo.data.width  ?? 120);
       this._showField(this._fieldHeight, x0 + 260, py, 'height', wo.data.height ?? 0);
       this._showField(this._fieldLabel,  x0 + 340, py, 'label',  wo.data.label  ?? '');
-      this._lblTarget.setText(`→ ${wo.data.targetLevel ?? '(none)'}`).setPosition(x0 + 440, py).setVisible(true);
+      const tgtLevel = this._levels.find(l => l.id === wo.data.targetLevel);
+      const tgtLevelName = tgtLevel ? tgtLevel.name : '(none)';
+      this._lblTarget.setText(`→ ${tgtLevelName}`).setPosition(x0 + 440, py).setVisible(true);
       this._btnTgtL.setPosition(x0 + 540, py).setVisible(true);
       this._btnTgtR.setPosition(x0 + 560, py).setVisible(true);
-      const twarpLabel = wo.data.targetWarpId ?? '(none)';
+      const tgtWarp = tgtLevel
+        ? (tgtLevel.transitZones ?? []).find(z => z.type === 'warp' && z.id === wo.data.targetWarpId)
+        : null;
+      const twarpLabel = tgtWarp ? (tgtWarp.label ?? tgtWarp.id) : '(none)';
       this._lblTargetWarp.setText(`↪ ${twarpLabel}`).setPosition(x0 + 580, py).setVisible(!!wo.data.targetLevel);
       this._btnWarpL.setPosition(x0 + 690, py).setVisible(!!wo.data.targetLevel);
       this._btnWarpR.setPosition(x0 + 710, py).setVisible(!!wo.data.targetLevel);
+    } else if (wo.type === 'container') {
+      // Toggles isHideoutChest / isUpgradeStation (le type est déterminé par la texture)
+      const isChest   = !!wo.data.isHideoutChest;
+      const isUpgrade = !!wo.data.isUpgradeStation;
+      this._btnHideoutChest
+        .setText(isChest   ? '[■ coffre]'  : '[□ coffre]')
+        .setColor(isChest   ? '#ffdd66' : '#555555')
+        .setPosition(x0 + 180, py).setVisible(true);
+      this._btnUpgradeStation
+        .setText(isUpgrade ? '[■ upgrade]' : '[□ upgrade]')
+        .setColor(isUpgrade ? '#ff9944' : '#555555')
+        .setPosition(x0 + 270, py).setVisible(true);
     } else {
       this._showField(this._fieldScale, x0 + 180, py, 'scale', Number((wo.data.scale ?? 1.0).toFixed(2)));
       // Toggles collision uniquement pour les props
@@ -1032,6 +1137,17 @@ export default class LevelEditorScene extends Phaser.Scene {
           .setText(blockingE ? '[■ ENEMY]' : '[□ enemy]')
           .setColor(blockingE ? '#ff6600' : '#555555')
           .setPosition(x0 + 340, py).setVisible(true);
+
+        // ── Collision box fields (visible only for blocksPlayer props) ─
+        if (blocking && wo.sprite) {
+          const col = wo.data.collision ?? {};
+          const dw  = wo.sprite.displayWidth;
+          const dh  = wo.sprite.displayHeight;
+          this._showCollisionField(this._fieldColW,  x0 + 420, py, 'col.w',  col.width   ?? Math.round(dw));
+          this._showCollisionField(this._fieldColH,  x0 + 490, py, 'col.h',  col.height  ?? Math.round(dh));
+          this._showCollisionField(this._fieldColOX, x0 + 560, py, 'col.ox', col.offsetX ?? 0);
+          this._showCollisionField(this._fieldColOY, x0 + 630, py, 'col.oy', col.offsetY ?? 0);
+        }
       }
     }
   }
@@ -1039,6 +1155,25 @@ export default class LevelEditorScene extends Phaser.Scene {
   _showField(field, x, y, label, value) {
     field.lbl.setPosition(x, y - 7).setText(label + ':').setVisible(true);
     field.val.setPosition(x, y + 6).setText(String(value)).setVisible(true).setColor('#cccccc');
+  }
+
+  _showCollisionField(field, x, y, label, value) {
+    field.lbl.setPosition(x, y - 7).setText(label + ':').setVisible(true);
+    field.val.setPosition(x, y + 6).setText(String(value)).setVisible(true).setColor('#44bbcc');
+  }
+
+  _startCollisionInput(wo, colProp, textObj) {
+    if (this._capturingInput) return;
+    const col = wo.data.collision ?? {};
+    let cur;
+    if (colProp === 'width')   cur = col.width  ?? Math.round(wo.sprite?.displayWidth  ?? 0);
+    if (colProp === 'height')  cur = col.height ?? Math.round(wo.sprite?.displayHeight ?? 0);
+    if (colProp === 'offsetX') cur = col.offsetX ?? 0;
+    if (colProp === 'offsetY') cur = col.offsetY ?? 0;
+    this._capturingInput = true;
+    this._inputBuffer    = String(cur ?? 0);
+    this._inputTarget    = { obj: wo, field: '__collision', colProp, textObj };
+    textObj.setColor('#ffff00').setText(this._inputBuffer + '_');
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -1100,6 +1235,28 @@ export default class LevelEditorScene extends Phaser.Scene {
         else if (path === 'spawnX')       { level.spawnX = Math.round(Math.max(0, val)); this._rebuildBackground(); }
       }
       textObj.setColor('#aaaacc');
+    } else if (field === '__collision' && obj) {
+      const val = parseFloat(this._inputBuffer);
+      if (!isNaN(val)) {
+        if (!obj.data.collision) obj.data.collision = {};
+        const colProp = this._inputTarget.colProp;
+        if (colProp === 'width' || colProp === 'height') {
+          obj.data.collision[colProp] = Math.max(1, Math.round(val));
+        } else {
+          obj.data.collision[colProp] = Math.round(val);
+        }
+        // If all collision values are default, clean up
+        const col = obj.data.collision;
+        const dw  = Math.round(obj.sprite?.displayWidth  ?? 0);
+        const dh  = Math.round(obj.sprite?.displayHeight ?? 0);
+        if ((col.width ?? dw) === dw && (col.height ?? dh) === dh
+            && (col.offsetX ?? 0) === 0 && (col.offsetY ?? 0) === 0) {
+          delete obj.data.collision;
+        }
+        this._drawSelectionRect(obj);
+        if (this._showHitboxes) this._rebuildHitboxOverlay();
+      }
+      textObj.setColor('#44bbcc');
     } else if (obj) {
       if (field === 'label') {
         const trimmed = this._inputBuffer.trim();
@@ -1143,9 +1300,10 @@ export default class LevelEditorScene extends Phaser.Scene {
       return;
     }
     const { field, textObj } = this._inputTarget;
-    if (field === '__levelProp')  textObj.setColor('#aaaacc');
-    else if (field === 'name')    { textObj.setColor('#ffffff'); this._updateToolbarName(); }
-    else                          textObj.setColor('#cccccc');
+    if (field === '__levelProp')    textObj.setColor('#aaaacc');
+    else if (field === '__collision') textObj.setColor('#44bbcc');
+    else if (field === 'name')      { textObj.setColor('#ffffff'); this._updateToolbarName(); }
+    else                            textObj.setColor('#cccccc');
     this._capturingInput = false;
     this._inputTarget    = null;
     this._updatePropsPanel();
@@ -1176,6 +1334,7 @@ export default class LevelEditorScene extends Phaser.Scene {
     }
 
     if (e.key === 'Escape') {
+      if (this._lootOverlay) { this._hideLootEditor(); return; }
       if (this._selected) this._deselect();
       else this.scene.start('TitleScene');
       return;
@@ -1184,11 +1343,59 @@ export default class LevelEditorScene extends Phaser.Scene {
     if (e.key === '+' || e.key === '=') { this._applyZoom(1.15); return; }
     if (e.key === '-')                   { this._applyZoom(1 / 1.15); return; }
     if (e.key === '0')                   { this._applyZoom(1 / this._zoom); return; }
+    if (e.key === 'h' || e.key === 'H')  { this._toggleHitboxes(); return; }
   }
 
   // ══════════════════════════════════════════════════════════════════════
   //  ACTIONS OBJETS
   // ══════════════════════════════════════════════════════════════════════
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  HITBOX OVERLAY (H key)
+  // ══════════════════════════════════════════════════════════════════════
+
+  _toggleHitboxes() {
+    this._showHitboxes = !this._showHitboxes;
+    if (this._showHitboxes) {
+      this._rebuildHitboxOverlay();
+    } else {
+      this._clearHitboxOverlay();
+    }
+  }
+
+  _clearHitboxOverlay() {
+    for (const g of this._hitboxGraphics) g.destroy();
+    this._hitboxGraphics = [];
+  }
+
+  /** Draw cyan collision rectangles for all blocksPlayer props. */
+  _rebuildHitboxOverlay() {
+    this._clearHitboxOverlay();
+    for (const wo of this._worldObjects) {
+      if (wo.type !== 'prop' || !wo.data.blocksPlayer || !wo.sprite) continue;
+      const col = wo.data.collision ?? {};
+      const s   = wo.sprite;
+      const dw  = s.displayWidth;
+      const dh  = s.displayHeight;
+      const cw  = col.width   ?? dw;
+      const ch  = col.height  ?? dh;
+      const cox = (dw - cw) / 2 + (col.offsetX ?? 0);
+      const coy = (dh - ch)     + (col.offsetY ?? 0);
+      const bx  = s.x - dw / 2 + cox;
+      const by  = s.y - dh     + coy;
+
+      const g = this.add.graphics().setDepth(8999);
+      this._worldLayer.add(g);
+      g.lineStyle(1, 0x00ccff, 0.7);
+      g.strokeRect(bx, by, cw, ch);
+      // Small label
+      const lbl = this.add.text(bx + 2, by + 2, `${Math.round(cw)}×${Math.round(ch)}`, {
+        fontFamily: 'monospace', fontSize: '8px', color: '#00ccff',
+      }).setDepth(8999).setAlpha(0.8);
+      this._worldLayer.add(lbl);
+      this._hitboxGraphics.push(g, lbl);
+    }
+  }
 
   _deleteSelected() {
     if (!this._selected) return;
@@ -1219,10 +1426,13 @@ export default class LevelEditorScene extends Phaser.Scene {
   _cycleTarget(dir) {
     const wo = this._selected?.obj;
     if (!wo || wo.type !== 'transit') return;
-    const ids  = [null, ...this._levels.map(l => l.id)];
-    const cur  = ids.indexOf(wo.data.targetLevel);
+    const curLevelId = this._levels[this._currentIdx]?.id;
+    // Exclude current level — a warp always targets another level
+    const ids  = [null, ...this._levels.filter(l => l.id !== curLevelId).map(l => l.id)];
+    const cur  = ids.indexOf(wo.data.targetLevel ?? null);
     const next = Phaser.Math.Wrap(cur + dir, 0, ids.length);
-    wo.data.targetLevel = ids[next];
+    wo.data.targetLevel  = ids[next];
+    wo.data.targetWarpId = null;  // reset warp destination when level changes
     this._refreshTransitWO(wo);
     this._updatePropsPanel();
     this._updateListPanel();
@@ -1235,11 +1445,13 @@ export default class LevelEditorScene extends Phaser.Scene {
     if (!targetLevel) return;
     const warps = (targetLevel.transitZones ?? []).filter(z => z.type === 'warp');
     if (!warps.length) return;
-    const ids  = [null, ...warps.map(z => z.id)];
+    // No null option — a warp must always land on a specific destination warp
+    const ids  = warps.map(z => z.id);
     const cur  = ids.indexOf(wo.data.targetWarpId ?? null);
     const next = Phaser.Math.Wrap(cur + dir, 0, ids.length);
     wo.data.targetWarpId = ids[next];
     this._updatePropsPanel();
+    this._updateListPanel();
   }
 
   _toggleBlocksPlayer() {
@@ -1254,6 +1466,23 @@ export default class LevelEditorScene extends Phaser.Scene {
     const wo = this._selected?.obj;
     if (!wo || wo.type !== 'prop') return;
     wo.data.blocksEnemy = !wo.data.blocksEnemy;
+    this._updatePropsPanel();
+    this._updateListPanel();
+  }
+
+  _toggleContainerFlag(flag) {
+    const wo = this._selected?.obj;
+    if (!wo || wo.type !== 'container') return;
+    wo.data[flag] = !wo.data[flag];
+    // Flags mutuellement exclusifs
+    if (flag === 'isHideoutChest'   && wo.data.isHideoutChest)   { wo.data.isUpgradeStation = false; }
+    if (flag === 'isUpgradeStation' && wo.data.isUpgradeStation) { wo.data.isHideoutChest   = false; }
+    // Mettre à jour le tint du sprite (basé sur texture + flags spéciaux)
+    const tint = wo.data.isHideoutChest      ? 0xffdd66
+               : wo.data.isUpgradeStation    ? 0xff9944
+               : wo.data.texture === 'toolbox' ? 0x44ddff
+               : 0x88ff88;
+    if (wo.sprite) wo.sprite.setTint(tint);
     this._updatePropsPanel();
     this._updateListPanel();
   }
@@ -1356,8 +1585,11 @@ export default class LevelEditorScene extends Phaser.Scene {
       }
       ln.push('    ],');
       ln.push('    containers: [');
-      for (const c of (lv.containers ?? []))
-        ln.push(`      { x: ${c.x}, y: ${c.y}, texture: '${c.texture ?? 'barrel'}' },`);
+      for (const c of (lv.containers ?? [])) {
+        const flagStr = (c.isHideoutChest   ? ', isHideoutChest: true'   : '')
+                      + (c.isUpgradeStation ? ', isUpgradeStation: true' : '');
+        ln.push(`      { x: ${c.x}, y: ${c.y}, texture: '${c.texture ?? 'barrel'}'${flagStr} },`);
+      }
       ln.push('    ],');
       ln.push('    transitZones: [');
       for (const z of (lv.transitZones ?? [])) {
@@ -1472,6 +1704,8 @@ export default class LevelEditorScene extends Phaser.Scene {
       this._showSaveFeedback(false);
       return;
     }
+    // Désactiver la toolbar principale pour éviter les clics parasites
+    this._toolbarBtns?.forEach(b => b.disableInteractive());
     this._lootTab = 'tables';
     const D   = 8000;
     const all = [];   // tous les objets persistants de l'overlay
@@ -1519,6 +1753,8 @@ export default class LevelEditorScene extends Phaser.Scene {
       this._capturingInput = false;
       this._inputTarget    = null;
     }
+    // Réactiver la toolbar principale
+    this._toolbarBtns?.forEach(b => b.setInteractive({ useHandCursor: true }));
   }
 
   _lootSetTab(tab) {
@@ -1529,6 +1765,7 @@ export default class LevelEditorScene extends Phaser.Scene {
   _lootRedrawContent() {
     for (const go of this._lootContentObjs) go.destroy();
     this._lootContentObjs = [];
+    this._lootPickerObjs  = null;
     if (this._lootTab === 'tables') this._lootBuildTables();
     else                            this._lootBuildItems();
     // Highlighter les onglets actifs
@@ -1539,97 +1776,222 @@ export default class LevelEditorScene extends Phaser.Scene {
   _lootBuildTables() {
     const D    = 8003;
     const Y0   = 36;
-    const RH   = 18;   // row height
-    const BMAX = 170;  // max bar width px
+    const RH   = 17;
+    const BMAX = 200;
+    const LW   = 180;  // largeur panneau gauche (liste des types)
+    const RX   = LW + 8; // x de départ du panneau droit
     const co   = (go) => { this._uiLayer.add(go); this._lootContentObjs.push(go); return go; };
 
-    const drawTable = (title, tableArr, tableKey, xOff) => {
-      const total = tableArr.reduce((s, e) => s + e.weight, 0) || 1;
-      co(this.add.text(xOff, Y0 + 4, title, {
-        fontFamily: 'monospace', fontSize: '10px', color: '#aaaacc',
-      }).setDepth(D));
-      co(this.add.rectangle(xOff + 175, Y0 + 16, 350, 1, 0x334455).setOrigin(0, 0.5).setDepth(D));
+    // ── Panneau gauche : liste des types ─────────────────────────────────
+    co(this.add.rectangle(LW / 2, GAME_H / 2, LW, GAME_H, 0x0a0a18).setDepth(D - 1));
+    co(this.add.rectangle(LW, GAME_H / 2, 1, GAME_H, 0x222244).setDepth(D));
 
-      tableArr.forEach((entry, idx) => {
-        const y      = Y0 + 22 + idx * RH;
-        const ratio  = entry.weight / total;
-        const barW   = Math.max(1, Math.round(ratio * BMAX));
-        const pct    = Math.round(ratio * 100);
+    const containerMap = this._lootData.containerLootTables ?? {};
+    const enemyMap     = this._lootData.enemyLootTables     ?? {};
 
-        // Nom
-        co(this.add.text(xOff, y, entry.type.slice(0, 13), {
-          fontFamily: 'monospace', fontSize: '10px', color: '#cccccc',
-        }).setDepth(D));
-
-        // Poids (cliquable)
-        const wtxt = co(this.add.text(xOff + 108, y, String(entry.weight).padStart(3), {
-          fontFamily: 'monospace', fontSize: '10px', color: '#ffcc44',
-        }).setDepth(D).setInteractive({ useHandCursor: true }));
-        wtxt.on('pointerover', () => wtxt.setColor('#ffffff'));
-        wtxt.on('pointerout',  () => {
-          if (!(this._inputTarget?.source === 'loot' && this._inputTarget.idx === idx
-             && this._inputTarget.table === tableKey)) wtxt.setColor('#ffcc44');
-        });
-        wtxt.on('pointerdown', () => {
-          if (this._capturingInput) return;
-          this._capturingInput = true;
-          this._inputBuffer    = String(entry.weight);
-          this._inputTarget    = { source: 'loot', type: 'weight', table: tableKey, idx, textObj: wtxt, cancelColor: '#ffcc44' };
-          wtxt.setColor('#ffff00').setText(this._inputBuffer + '_');
-        });
-
-        // Pourcentage
-        co(this.add.text(xOff + 132, y, `${pct}%`.padStart(4), {
-          fontFamily: 'monospace', fontSize: '9px', color: '#556677',
-        }).setDepth(D));
-
-        // Barre fond + remplissage
-        co(this.add.rectangle(xOff + 165, y + 4, BMAX, 8, 0x1a1a33).setOrigin(0, 0.5).setDepth(D));
-        co(this.add.rectangle(xOff + 165, y + 4, barW, 8, 0x4466cc).setOrigin(0, 0.5).setDepth(D + 1));
-      });
-
-      // Séparateur + total
-      const botY = Y0 + 22 + tableArr.length * RH;
-      co(this.add.rectangle(xOff + 175, botY, 350, 1, 0x334455).setOrigin(0, 0.5).setDepth(D));
-      co(this.add.text(xOff, botY + 4, `Total : ${total}`, {
-        fontFamily: 'monospace', fontSize: '9px', color: '#445566',
-      }).setDepth(D));
-
-      // Count items
-      const isContainer = tableKey === 'container';
-      const count = isContainer ? this._lootData.containerItemCount : this._lootData.corpseItemCount;
-      const countY = botY + 20;
-      co(this.add.text(xOff, countY, `Drops : ${count?.min ?? 0}–${count?.max ?? 1} items`, {
-        fontFamily: 'monospace', fontSize: '9px', color: '#445566',
-      }).setDepth(D));
-
-      // Boutons +/- pour min / max
-      const editCount = (field, dx) => {
-        const obj = isContainer ? this._lootData.containerItemCount : this._lootData.corpseItemCount;
-        obj[field] = Math.max(0, (obj[field] ?? 0) + dx);
-        if (obj.min > obj.max) obj[field === 'min' ? 'max' : 'min'] = obj[field];
+    let ly = Y0 + 4;
+    const mkTypeBtn = (label, kind, key) => {
+      const isSel = this._lootSelectedType?.kind === kind && this._lootSelectedType?.key === key;
+      const col   = isSel ? '#ffffff' : (kind === 'container' ? '#88ffcc' : '#ffaa44');
+      const bg    = isSel ? 0x1a2233 : 0x0a0a18;
+      co(this.add.rectangle(LW / 2, ly + 6, LW - 2, 14, bg).setDepth(D));
+      const btn = co(this.add.text(6, ly, label.slice(0, 20), {
+        fontFamily: 'monospace', fontSize: '9px', color: col,
+      }).setDepth(D + 1).setInteractive({ useHandCursor: true }));
+      btn.on('pointerover', () => { if (!isSel) btn.setColor('#ffffff'); });
+      btn.on('pointerout',  () => { if (!isSel) btn.setColor(col); });
+      btn.on('pointerdown', () => {
+        this._lootSelectedType = { kind, key };
         this._lootRedrawContent();
-      };
-      const mkCntBtn = (x, y, lbl, cb) => {
-        const b = co(this.add.text(x, y, lbl, {
-          fontFamily: 'monospace', fontSize: '10px', color: '#556677',
-        }).setDepth(D).setInteractive({ useHandCursor: true }));
-        b.on('pointerdown', cb);
-        b.on('pointerover', () => b.setColor('#ffffff'));
-        b.on('pointerout',  () => b.setColor('#556677'));
-        return b;
-      };
-      mkCntBtn(xOff + 165, countY, '[-min]', () => editCount('min', -1));
-      mkCntBtn(xOff + 210, countY, '[+min]', () => editCount('min', +1));
-      mkCntBtn(xOff + 255, countY, '[-max]', () => editCount('max', -1));
-      mkCntBtn(xOff + 300, countY, '[+max]', () => editCount('max', +1));
+      });
+      ly += 15;
     };
 
-    // Séparateur vertical centre
-    co(this.add.rectangle(GAME_W / 2, GAME_H / 2, 1, GAME_H, 0x222244).setDepth(D));
+    co(this.add.text(6, ly, '── CONTAINERS ──', {
+      fontFamily: 'monospace', fontSize: '8px', color: '#334455',
+    }).setDepth(D));
+    ly += 13;
+    for (const key of Object.keys(containerMap)) mkTypeBtn(key, 'container', key);
 
-    drawTable('CONTAINER TABLE', this._lootData.containerTable, 'container', 8);
-    drawTable('CORPSE TABLE',    this._lootData.corpseTable,    'corpse',    GAME_W / 2 + 8);
+    // Bouton [+ nouveau type container]
+    const addCBtn = co(this.add.text(6, ly, '[+ type]', {
+      fontFamily: 'monospace', fontSize: '8px', color: '#44ff88',
+    }).setDepth(D + 1).setInteractive({ useHandCursor: true }));
+    addCBtn.on('pointerover', () => addCBtn.setColor('#ffffff'));
+    addCBtn.on('pointerout',  () => addCBtn.setColor('#44ff88'));
+    addCBtn.on('pointerdown', () => {
+      const newKey = `container_${Date.now()}`;
+      this._lootData.containerLootTables[newKey]  = [];
+      this._lootData.containerItemCounts[newKey]  = { min: 1, max: 3 };
+      this._lootSelectedType = { kind: 'container', key: newKey };
+      this._lootRedrawContent();
+    });
+    ly += 18;
+
+    co(this.add.text(6, ly, '── ENNEMIS ──', {
+      fontFamily: 'monospace', fontSize: '8px', color: '#334455',
+    }).setDepth(D));
+    ly += 13;
+    for (const key of Object.keys(enemyMap)) mkTypeBtn(key, 'enemy', key);
+
+    // Bouton [+ nouveau type ennemi]
+    const addEBtn = co(this.add.text(6, ly, '[+ type]', {
+      fontFamily: 'monospace', fontSize: '8px', color: '#44ff88',
+    }).setDepth(D + 1).setInteractive({ useHandCursor: true }));
+    addEBtn.on('pointerover', () => addEBtn.setColor('#ffffff'));
+    addEBtn.on('pointerout',  () => addEBtn.setColor('#44ff88'));
+    addEBtn.on('pointerdown', () => {
+      const newKey = `enemy_${Date.now()}`;
+      this._lootData.enemyLootTables[newKey]  = [];
+      this._lootData.enemyItemCounts[newKey]  = { min: 0, max: 2 };
+      this._lootSelectedType = { kind: 'enemy', key: newKey };
+      this._lootRedrawContent();
+    });
+
+    // ── Panneau droit : table du type sélectionné ─────────────────────────
+    if (!this._lootSelectedType) return;
+
+    const { kind, key } = this._lootSelectedType;
+    const isContainer = kind === 'container';
+    const tableArr  = isContainer
+      ? (this._lootData.containerLootTables[key] ?? [])
+      : (this._lootData.enemyLootTables[key]     ?? []);
+    const countObj  = isContainer
+      ? (this._lootData.containerItemCounts[key] ?? { min: 1, max: 3 })
+      : (this._lootData.enemyItemCounts[key]     ?? { min: 0, max: 2 });
+
+    // En-tête
+    const hdrColor = isContainer ? '#88ffcc' : '#ffaa44';
+    co(this.add.text(RX, Y0 + 4, `${isContainer ? 'CONTAINER' : 'ENNEMI'} : ${key}`, {
+      fontFamily: 'monospace', fontSize: '10px', color: hdrColor,
+    }).setDepth(D));
+
+    // Bouton supprimer ce type
+    const delTypeBtn = co(this.add.text(RX + 380, Y0 + 4, '[SUPPRIMER CE TYPE]', {
+      fontFamily: 'monospace', fontSize: '8px', color: '#664444',
+    }).setDepth(D).setInteractive({ useHandCursor: true }));
+    delTypeBtn.on('pointerover', () => delTypeBtn.setColor('#ff4444'));
+    delTypeBtn.on('pointerout',  () => delTypeBtn.setColor('#664444'));
+    delTypeBtn.on('pointerdown', () => {
+      if (isContainer) delete this._lootData.containerLootTables[key];
+      else             delete this._lootData.enemyLootTables[key];
+      this._lootSelectedType = null;
+      this._lootRedrawContent();
+    });
+
+    co(this.add.rectangle(RX + 240, Y0 + 17, GAME_W - RX - 8, 1, 0x334455).setOrigin(0.5, 0.5).setDepth(D));
+
+    const total = tableArr.reduce((s, e) => s + e.weight, 0) || 1;
+
+    tableArr.forEach((entry, idx) => {
+      const y     = Y0 + 22 + idx * RH;
+      const ratio = entry.weight / total;
+      const barW  = Math.max(1, Math.round(ratio * BMAX));
+      const pct   = Math.round(ratio * 100);
+
+      co(this.add.text(RX, y, entry.type.slice(0, 14), {
+        fontFamily: 'monospace', fontSize: '10px', color: '#cccccc',
+      }).setDepth(D));
+
+      const wtxt = co(this.add.text(RX + 118, y, String(entry.weight).padStart(3), {
+        fontFamily: 'monospace', fontSize: '10px', color: '#ffcc44',
+      }).setDepth(D).setInteractive({ useHandCursor: true }));
+      wtxt.on('pointerover', () => wtxt.setColor('#ffffff'));
+      wtxt.on('pointerout',  () => {
+        if (!(this._inputTarget?.source === 'loot' && this._inputTarget.idx === idx
+           && this._inputTarget.typeKey === key)) wtxt.setColor('#ffcc44');
+      });
+      wtxt.on('pointerdown', () => {
+        if (this._capturingInput) return;
+        this._capturingInput = true;
+        this._inputBuffer    = String(entry.weight);
+        this._inputTarget    = { source: 'loot', type: 'weight', typeKey: key, idx, textObj: wtxt, cancelColor: '#ffcc44' };
+        wtxt.setColor('#ffff00').setText(this._inputBuffer + '_');
+      });
+
+      co(this.add.text(RX + 142, y, `${pct}%`.padStart(4), {
+        fontFamily: 'monospace', fontSize: '9px', color: '#556677',
+      }).setDepth(D));
+      co(this.add.rectangle(RX + 178, y + 4, BMAX, 8, 0x1a1a33).setOrigin(0, 0.5).setDepth(D));
+      co(this.add.rectangle(RX + 178, y + 4, barW, 8, 0x4466cc).setOrigin(0, 0.5).setDepth(D + 1));
+
+      const delT = co(this.add.text(RX + 388, y, '[✕]', {
+        fontFamily: 'monospace', fontSize: '9px', color: '#ff4444',
+      }).setDepth(D).setInteractive({ useHandCursor: true }));
+      delT.on('pointerover', () => delT.setColor('#ffffff'));
+      delT.on('pointerout',  () => delT.setColor('#ff4444'));
+      delT.on('pointerdown', () => { tableArr.splice(idx, 1); this._lootRedrawContent(); });
+    });
+
+    // Séparateur + total + drops count
+    const botY = Y0 + 22 + tableArr.length * RH;
+    co(this.add.rectangle(RX + 240, botY, GAME_W - RX - 8, 1, 0x334455).setOrigin(0.5, 0.5).setDepth(D));
+    co(this.add.text(RX, botY + 4, `Total : ${total}`, {
+      fontFamily: 'monospace', fontSize: '9px', color: '#445566',
+    }).setDepth(D));
+
+    // [+ ADD ITEM]
+    const addTBtn = co(this.add.text(RX + 90, botY + 4, '[+ ADD ITEM]', {
+      fontFamily: 'monospace', fontSize: '9px', color: '#44ff88',
+    }).setDepth(D).setInteractive({ useHandCursor: true }));
+    addTBtn.on('pointerover', () => addTBtn.setColor('#ffffff'));
+    addTBtn.on('pointerout',  () => addTBtn.setColor('#44ff88'));
+    addTBtn.on('pointerdown', () => {
+      const existingTypes = new Set(tableArr.map(e => e.type));
+      const available = Object.keys(this._lootData.items ?? {}).filter(k => !existingTypes.has(k));
+      if (available.length === 0) return;
+      if (this._lootPickerObjs) {
+        this._lootPickerObjs.forEach(o => o.destroy());
+        this._lootPickerObjs = null;
+        if (this._lootPickerKey === key) return;
+      }
+      this._lootPickerKey = key;
+      const PD = 8010;
+      const px = RX + 90;
+      const py = botY + 18;
+      const pw = 160;
+      const ph = available.length * 14 + 6;
+      this._lootPickerObjs = [];
+      const pc = (go) => { this._uiLayer.add(go); this._lootPickerObjs.push(go); this._lootContentObjs.push(go); return go; };
+      pc(this.add.rectangle(px + pw / 2, py + ph / 2, pw, ph, 0x111122).setDepth(PD));
+      pc(this.add.rectangle(px + pw / 2, py + ph / 2, pw, ph).setStrokeStyle(1, 0x334455).setDepth(PD));
+      available.forEach((k, i) => {
+        const rt = pc(this.add.text(px + 4, py + 4 + i * 14, k.slice(0, 18), {
+          fontFamily: 'monospace', fontSize: '9px', color: '#aaccff',
+        }).setDepth(PD + 1).setInteractive({ useHandCursor: true }));
+        rt.on('pointerover', () => rt.setColor('#ffffff'));
+        rt.on('pointerout',  () => rt.setColor('#aaccff'));
+        rt.on('pointerdown', () => {
+          tableArr.push({ type: k, weight: 10 });
+          this._lootPickerObjs.forEach(o => o.destroy());
+          this._lootPickerObjs = null;
+          this._lootRedrawContent();
+        });
+      });
+    });
+
+    // Drops count
+    const countY = botY + 22;
+    co(this.add.text(RX, countY, `Drops : ${countObj.min}–${countObj.max} items`, {
+      fontFamily: 'monospace', fontSize: '9px', color: '#445566',
+    }).setDepth(D));
+    const editCount = (field, dx) => {
+      countObj[field] = Math.max(0, (countObj[field] ?? 0) + dx);
+      if (countObj.min > countObj.max) countObj[field === 'min' ? 'max' : 'min'] = countObj[field];
+      this._lootRedrawContent();
+    };
+    const mkCntBtn = (x, lbl, cb) => {
+      const b = co(this.add.text(x, countY, lbl, {
+        fontFamily: 'monospace', fontSize: '9px', color: '#556677',
+      }).setDepth(D).setInteractive({ useHandCursor: true }));
+      b.on('pointerdown', cb);
+      b.on('pointerover', () => b.setColor('#ffffff'));
+      b.on('pointerout',  () => b.setColor('#556677'));
+    };
+    mkCntBtn(RX + 130, '[-min]', () => editCount('min', -1));
+    mkCntBtn(RX + 168, '[+min]', () => editCount('min', +1));
+    mkCntBtn(RX + 206, '[-max]', () => editCount('max', -1));
+    mkCntBtn(RX + 244, '[+max]', () => editCount('max', +1));
   }
 
   _lootBuildItems() {
@@ -1653,10 +2015,11 @@ export default class LevelEditorScene extends Phaser.Scene {
     co(this.add.rectangle(GAME_W / 2, Y0 + 17, GAME_W - 8, 1, 0x334455).setOrigin(0.5, 0.5).setDepth(D));
 
     const allItems = Object.entries(this._lootData.items ?? {});
-    const usedKeys = new Set([
-      ...(this._lootData.containerTable ?? []).map(e => e.type),
-      ...(this._lootData.corpseTable    ?? []).map(e => e.type),
-    ]);
+    const usedKeys = new Set();
+    for (const table of Object.values(this._lootData.containerLootTables ?? {}))
+      for (const e of table) usedKeys.add(e.type);
+    for (const table of Object.values(this._lootData.enemyLootTables ?? {}))
+      for (const e of table) usedKeys.add(e.type);
 
     // Afficher en 2 colonnes (max ~15 items par colonne)
     const COL1 = allItems.slice(0, Math.ceil(allItems.length / 2));
@@ -1717,14 +2080,15 @@ export default class LevelEditorScene extends Phaser.Scene {
   }
 
   _commitLootInput() {
-    const { type, table, idx, textObj } = this._inputTarget;
-    if (type === 'weight') {
+    const { type, typeKey, idx } = this._inputTarget;
+    if (type === 'weight' && typeKey) {
       const val = parseInt(this._inputBuffer, 10);
       if (!isNaN(val) && val >= 0) {
-        const arr = table === 'container'
-          ? this._lootData.containerTable
-          : this._lootData.corpseTable;
-        arr[idx].weight = val;
+        const { kind, key } = this._lootSelectedType ?? {};
+        const arr = kind === 'container'
+          ? this._lootData.containerLootTables[key]
+          : this._lootData.enemyLootTables[key];
+        if (arr) arr[idx].weight = val;
       }
     }
     this._capturingInput = false;

@@ -8,6 +8,7 @@ import {
   encodeCharDelete,
   encodeChestSave,
   encodeSkillGain,
+  encodeRevivePlayer,
   getMsgType,
   decodeWelcome,
   decodeRoomSnapshot,
@@ -20,6 +21,8 @@ import {
   decodeJoinRefused,
   decodeChestData,
   decodeSkills,
+  decodeUpgrades,
+  decodeReviveMsg,
   S_WELCOME,
   S_ROOM_SNAPSHOT,
   S_PLAYER_JOIN,
@@ -32,6 +35,8 @@ import {
   S_JOIN_REFUSED,
   S_CHEST_DATA,
   S_SKILLS,
+  S_UPGRADES,
+  S_REVIVE_PLAYER,
 } from './NetProtocol.js';
 
 
@@ -71,6 +76,8 @@ export default class NetworkManager {
     this.onJoinRefused   = null;  // (reason: string) => {}
     this.onChestData     = null;  // (items: string[]) => {}
     this.onSkills        = null;  // (skills: {skillName: totalXP}) => {}
+    this.onUpgrades      = null;  // (upgrades: {id: level}) => {}
+    this.onRevive        = null;  // (targetPlayerId: number) => {}
 
     // ── Rate limiter ──────────────────────────────────────────────────────
     this._sendInterval = 50;  // ms (20 Hz)
@@ -268,6 +275,9 @@ export default class NetworkManager {
   /** Notify server of XP gained for a skill. */
   sendSkillGain(skillName, xp) { this._send(encodeSkillGain(skillName, xp)); }
 
+  /** Notify server that this player revived another player. */
+  sendRevive(targetPlayerId) { this._send(encodeRevivePlayer(targetPlayerId)); }
+
   /**
    * Disconnect cleanly (cancels any pending reconnect).
    */
@@ -359,6 +369,16 @@ export default class NetworkManager {
       case S_SKILLS: {
         const skills = decodeSkills(data);
         if (this.onSkills) this.onSkills(skills);
+        break;
+      }
+      case S_UPGRADES: {
+        const upgrades = decodeUpgrades(data);
+        if (this.onUpgrades) this.onUpgrades(upgrades);
+        break;
+      }
+      case S_REVIVE_PLAYER: {
+        const { targetPlayerId } = decodeReviveMsg(data);
+        if (this.onRevive) this.onRevive(targetPlayerId);
         break;
       }
       default:

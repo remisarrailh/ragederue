@@ -18,6 +18,11 @@ const TRANSIT_BAR_H    = 12;
 const TRANSIT_BAR_X    = (GAME_W - TRANSIT_BAR_W) / 2;
 const TRANSIT_BAR_Y    = GAME_H - 56;
 
+const REVIVE_DURATION  = 4000;  // ms to hold E to revive a downed player
+const HEAL_DURATION    = 2000;  // ms to hold E to heal an ally
+const ALLY_RADIUS      = 90;    // px proximity to interact with a remote player
+const DOWN_TIMEOUT     = 30000; // ms before a downed player auto-dies if not revived
+
 export default class GameScene extends Phaser.Scene {
   constructor() { super({ key: 'GameScene' }); }
 
@@ -34,6 +39,7 @@ export default class GameScene extends Phaser.Scene {
     const levelSource = this._fromEditor
       ? (this.registry.get('editorLevels') || LEVELS)
       : LEVELS;
+    this._levelSource = levelSource;  // kept for warp label resolution
     this._levelConfig = levelSource.find(l => l.id === levelId) || LEVELS[0];
 
     // ── Lane bounds (per-level, fallback to global constants) ─────────────
@@ -156,6 +162,24 @@ export default class GameScene extends Phaser.Scene {
       stroke: '#000000', strokeThickness: 4,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(9999).setVisible(false);
 
+    // ── Action bar (revive / heal ally) — same position as transit bar ────
+    this._actionBarBg    = this.add.graphics().setScrollFactor(0).setDepth(9998).setVisible(false);
+    this._actionBarFill  = this.add.graphics().setScrollFactor(0).setDepth(9999).setVisible(false);
+    this._actionBarLabel = this.add.text(GAME_W / 2, TRANSIT_BAR_Y - 18, '', {
+      fontFamily: 'monospace', fontSize: '13px', color: '#ff88cc',
+      stroke: '#000000', strokeThickness: 4,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(9999).setVisible(false);
+
+    // ── Ally interaction state ────────────────────────────────────────────
+    this._allyAction        = null;   // null | 'revive' | 'heal'
+    this._allyActionTimer   = 0;      // ms elapsed
+    this._allyActionTarget  = null;   // RemotePlayer being acted on
+    this._allyPrompts       = new Map(); // netId → Phaser.Text (world-space prompts)
+
+    // ── Down state (local player is downed, waiting for revive) ──────────
+    this._downTimer = 0;    // ms spent down — auto-death at DOWN_TIMEOUT
+    this._downOverlay = null;
+
     // ── Music ─────────────────────────────────────────────────────────────
     this.sound.stopByKey('music_street');
     this.sound.stopByKey('music_naval');
@@ -197,15 +221,37 @@ export default class GameScene extends Phaser.Scene {
     this.enemies.forEach(e => e.update(this.player));
     this.combat.update([this.player, ...this.enemies]);
 
-    if (this.player.hp <= 0) return this._endGame('over', 'DEAD');
+    if (this.player.hp <= 0) {
+      // If allies are present, go down and wait for revive
+      if (this.remotePlayers.size > 0 && this.player.state === 'dead') {
+        this._handleDownState(delta);
+        return;  // don't process the rest of update while down
+      }
+      return this._endGame('over', 'DEAD');
+    }
+
+    // If player was just revived (hp > 0 again after being down), clean up overlay
+    if (this._downOverlay) { this._clearDownOverlay(); }
+
+    // ── Ally prompts (revive / heal) ──────────────────────────────────────
+    this._updateAllyPrompts();
+
+    // ── Ally action countdown ─────────────────────────────────────────────
+    this._updateAllyAction(delta);
 
     this.registry.set('runTimer', this.runTimer);
 
     // ── Search proximity ───────────────────────────────────────────────────
     const searchResult = this.lootSystem.update(this.player, this.enemies);
     if (searchResult) {
-      const gp = this.registry.get('inputMode') === 'gp';
-      this._searchPrompt.setText(gp ? '[Y] Search' : '[E] Search').setVisible(true);
+      const gp  = this.registry.get('inputMode') === 'gp';
+      const key = gp ? '[Y]' : '[E]';
+      const t   = searchResult.target;
+      const lbl = t.isHideoutChest    ? `${key} Coffre`
+                : t.isUpgradeStation ? `${key} Améliorations`
+                : t.texture === 'toolbox' ? `${key} Toolbox`
+                : `${key} Search`;
+      this._searchPrompt.setText(lbl).setVisible(true);
       this._searchPrompt.setPosition(
         searchResult.target.x,
         (searchResult.target.y ?? searchResult.target.image?.y ?? this.player.y) - 60,
@@ -228,9 +274,12 @@ export default class GameScene extends Phaser.Scene {
     }
     this._transitZone = inZone;
 
-    // Cancel countdown if player left the zone
+    // Auto-start countdown on zone entry; cancel if player leaves
+    const zoneValid = inZone && !(inZone.type === 'warp' && !inZone.targetLevel);
     if (this._transitActive && !inZone) {
       this._cancelTransit();
+    } else if (zoneValid && !this._transitActive) {
+      this._startTransit();
     }
 
     // Advance countdown
@@ -249,15 +298,12 @@ export default class GameScene extends Phaser.Scene {
       }
     }
 
-    // Show/hide zone entry prompt (only when not counting down)
-    if (inZone && !this._transitActive) {
-      const gp    = this.registry.get('inputMode') === 'gp';
-      const key   = gp ? '[Y]' : '[E]';
-      const action = inZone.type === 'extract' ? 'Extraire' : (inZone.label ?? 'Entrer');
-      const zoneW  = inZone.width ?? 120;
+    // Prompt visible seulement pour les warps sans destination (non configurés)
+    if (inZone && inZone.type === 'warp' && !inZone.targetLevel) {
+      const zoneW    = inZone.width ?? 120;
       const zoneTopY = inZone.y ?? (this.laneTop - 30);
       this._transitPrompt
-        .setText(`${key} ${action}`)
+        .setText('(warp non configuré)')
         .setPosition(inZone.x + zoneW / 2, zoneTopY - 18)
         .setVisible(true);
     } else {
@@ -293,7 +339,7 @@ export default class GameScene extends Phaser.Scene {
 
   _updateTransitBar(pct, zone) {
     const secsLeft = ((TRANSIT_DURATION - this._transitTimer) / 1000).toFixed(1);
-    const action   = zone.type === 'extract' ? 'EXTRACTION' : (zone.label?.toUpperCase() ?? 'WARP');
+    const action   = zone.type === 'extract' ? 'EXTRACTION' : this._warpLabel(zone).toUpperCase();
 
     this._transitBarBg.clear().setVisible(true);
     this._transitBarBg.fillStyle(0x000000, 0.75);
@@ -351,6 +397,175 @@ export default class GameScene extends Phaser.Scene {
     this.runTimer  = remainingTime;
     this.player.hp = this.player.maxHp;
     console.log('[Game] World reset complete');
+  }
+
+  // ── Down state (local player downed, waiting for revive) ─────────────
+  _handleDownState(delta) {
+    this._downTimer += delta;
+
+    // Show / update "À TERRE" overlay
+    if (!this._downOverlay) {
+      const bg = this.add.rectangle(GAME_W / 2, GAME_H / 2 - 30, 320, 60, 0x000000, 0.75)
+        .setScrollFactor(0).setDepth(50001);
+      const txt = this.add.text(GAME_W / 2, GAME_H / 2 - 30, 'À TERRE — Attendez le revive', {
+        fontFamily: 'monospace', fontSize: '14px', color: '#ff4444',
+        stroke: '#000', strokeThickness: 4,
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(50002);
+      const timer = this.add.text(GAME_W / 2, GAME_H / 2 + 4, '', {
+        fontFamily: 'monospace', fontSize: '11px', color: '#aaaaaa',
+        stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(50002);
+      this.tweens.add({ targets: txt, alpha: 0.4, duration: 500, yoyo: true, repeat: -1 });
+      this._downOverlay = { bg, txt, timer };
+    }
+    const secsLeft = Math.max(0, (DOWN_TIMEOUT - this._downTimer) / 1000).toFixed(0);
+    this._downOverlay.timer.setText(`${secsLeft}s avant mort définitive`);
+
+    if (this._downTimer >= DOWN_TIMEOUT) {
+      this._clearDownOverlay();
+      this._endGame('over', 'DEAD');
+    }
+  }
+
+  _clearDownOverlay() {
+    if (this._downOverlay) {
+      this._downOverlay.bg.destroy();
+      this._downOverlay.txt.destroy();
+      this._downOverlay.timer.destroy();
+      this._downOverlay = null;
+    }
+    this._downTimer = 0;
+  }
+
+  // ── Ally prompts on nearby remote players ─────────────────────────────
+  _updateAllyPrompts() {
+    const gp  = this.registry.get('inputMode') === 'gp';
+    const key = gp ? '[Y]' : '[E]';
+    const seen = new Set();
+
+    for (const [id, rp] of this.remotePlayers) {
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, rp.x, rp.y);
+      if (dist > ALLY_RADIUS) {
+        const p = this._allyPrompts.get(id);
+        if (p) { p.destroy(); this._allyPrompts.delete(id); }
+        continue;
+      }
+
+      const isDown   = rp.state === 'dead';
+      const isHurt   = !isDown && rp.hp < 60;
+      const canHeal  = isHurt && this.inventory.items.some(i => i.identified && (i.def.healAmount ?? 0) > 0);
+
+      if (!isDown && !canHeal) {
+        const p = this._allyPrompts.get(id);
+        if (p) { p.destroy(); this._allyPrompts.delete(id); }
+        continue;
+      }
+
+      seen.add(id);
+      const label = isDown
+        ? `${key} Relever ${rp.netName}`
+        : `${key} Soigner ${rp.netName}`;
+
+      let prompt = this._allyPrompts.get(id);
+      if (!prompt) {
+        prompt = this.add.text(rp.x, rp.y - 68, label, {
+          fontFamily: 'monospace', fontSize: '11px', color: isDown ? '#ff6666' : '#66ff99',
+          stroke: '#000000', strokeThickness: 3,
+        }).setOrigin(0.5).setDepth(9999);
+        this.tweens.add({ targets: prompt, alpha: 0.3, duration: 500, yoyo: true, repeat: -1 });
+        this._allyPrompts.set(id, prompt);
+      } else {
+        prompt.setPosition(rp.x, rp.y - 68).setText(label)
+          .setColor(isDown ? '#ff6666' : '#66ff99');
+      }
+    }
+
+    // Remove prompts for players who left
+    for (const [id, p] of this._allyPrompts) {
+      if (!seen.has(id) && !this.remotePlayers.has(id)) {
+        p.destroy(); this._allyPrompts.delete(id);
+      }
+    }
+  }
+
+  // ── Ally action bar (revive / heal) ──────────────────────────────────
+  _updateAllyAction(delta) {
+    if (!this._allyAction) return;
+    const rp = this._allyActionTarget;
+
+    // Cancel if ally moved away or is no longer in the right state
+    if (!rp || !rp.active) { this._cancelAllyAction(); return; }
+    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, rp.x, rp.y);
+    if (dist > ALLY_RADIUS + 20) { this._cancelAllyAction(); return; }
+    if (this._allyAction === 'revive' && rp.state !== 'dead') { this._cancelAllyAction(); return; }
+
+    this._allyActionTimer += delta;
+    const duration = this._allyAction === 'revive' ? REVIVE_DURATION : HEAL_DURATION;
+    const pct      = Math.min(1, this._allyActionTimer / duration);
+    const color    = this._allyAction === 'revive' ? 0xff6666 : 0x66ff99;
+    const label    = this._allyAction === 'revive'
+      ? `REVIVE  ${rp.netName}  ${((duration - this._allyActionTimer) / 1000).toFixed(1)}s`
+      : `SOIN    ${rp.netName}  ${((duration - this._allyActionTimer) / 1000).toFixed(1)}s`;
+
+    this._actionBarBg.clear().setVisible(true)
+      .fillStyle(0x000000, 0.75)
+      .fillRect(TRANSIT_BAR_X - 2, TRANSIT_BAR_Y - 2, TRANSIT_BAR_W + 4, TRANSIT_BAR_H + 4)
+      .lineStyle(1, color, 0.6)
+      .strokeRect(TRANSIT_BAR_X - 2, TRANSIT_BAR_Y - 2, TRANSIT_BAR_W + 4, TRANSIT_BAR_H + 4);
+    this._actionBarFill.clear().setVisible(true)
+      .fillStyle(color, 0.9)
+      .fillRect(TRANSIT_BAR_X, TRANSIT_BAR_Y, Math.round(TRANSIT_BAR_W * pct), TRANSIT_BAR_H);
+    this._actionBarLabel.setText(label).setVisible(true);
+
+    if (this._allyActionTimer >= duration) {
+      this._completeAllyAction();
+    }
+  }
+
+  _cancelAllyAction() {
+    this._allyAction       = null;
+    this._allyActionTimer  = 0;
+    this._allyActionTarget = null;
+    this._actionBarBg.setVisible(false);
+    this._actionBarFill.setVisible(false);
+    this._actionBarLabel.setVisible(false);
+  }
+
+  _completeAllyAction() {
+    const rp = this._allyActionTarget;
+    if (!rp) { this._cancelAllyAction(); return; }
+
+    if (this._allyAction === 'revive') {
+      // Patch RemotePlayer locally for immediate visual feedback
+      rp.hp    = 30;
+      rp.state = 'idle';
+      rp.play('player_idle', true);
+      // Send C_REVIVE_PLAYER → server broadcasts S_REVIVE_PLAYER to all clients in the room
+      // The revived player's client calls player.revive(30) and clears their down overlay
+      if (this.net.connected) this.net.sendRevive(rp.netId);
+    } else if (this._allyAction === 'heal') {
+      // Use the best heal item in the inventory on the ally
+      const healItem = [...this.inventory.items]
+        .filter(i => i.identified && (i.def.healAmount ?? 0) > 0)
+        .sort((a, b) => (a.def.healAmount ?? 0) - (b.def.healAmount ?? 0))[0];
+      if (healItem) {
+        this.inventory.removeItem(healItem);
+        // Remote player gains HP (local visual only until server message added)
+        rp.hp = Math.min(100, rp.hp + (healItem.def.healAmount ?? 20));
+        if (this.net.sendSkillGain) this.net.sendSkillGain('healSkill', 15);
+      }
+    }
+    this._cancelAllyAction();
+  }
+
+  // ── Human-readable label for a warp zone ─────────────────────────────
+  _warpLabel(zone) {
+    if (!zone.targetLevel) return zone.label ?? 'WARP';
+    const tgtLevel = this._levelSource?.find(l => l.id === zone.targetLevel);
+    if (!tgtLevel) return zone.label ?? zone.targetLevel;
+    const tgtWarp  = (tgtLevel.transitZones ?? []).find(z => z.type === 'warp' && z.id === zone.targetWarpId);
+    const warpName = tgtWarp ? (tgtWarp.label ?? '') : '';
+    return warpName ? `${tgtLevel.name} / ${warpName}` : tgtLevel.name;
   }
 
   // ── Warp to another level ─────────────────────────────────────────────
@@ -426,11 +641,29 @@ export default class GameScene extends Phaser.Scene {
   // ── Interact ─────────────────────────────────────────────────────────
   _interact() {
     if (this._gameEnded || this.player.searching || this._searchCooldown > 0) return;
-    // Start transit if inside a zone and not already counting down
-    if (this._transitZone && !this._transitActive) {
-      this._startTransit();
+    // Don't interact with world while downed
+    if (this.player.state === 'dead') return;
+
+    // ── Cancel ongoing ally action if E pressed again ─────────────────
+    if (this._allyAction) { this._cancelAllyAction(); return; }
+
+    // ── Check for nearby ally to revive / heal ────────────────────────
+    let bestAlly = null, bestDist = ALLY_RADIUS;
+    for (const [, rp] of this.remotePlayers) {
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, rp.x, rp.y);
+      if (dist > bestDist) continue;
+      const isDown  = rp.state === 'dead';
+      const canHeal = !isDown && rp.hp < 60
+        && this.inventory.items.some(i => i.identified && (i.def.healAmount ?? 0) > 0);
+      if (isDown || canHeal) { bestDist = dist; bestAlly = { rp, isDown }; }
+    }
+    if (bestAlly) {
+      this._allyAction       = bestAlly.isDown ? 'revive' : 'heal';
+      this._allyActionTimer  = 0;
+      this._allyActionTarget = bestAlly.rp;
       return;
     }
+
     const target = this.lootSystem.nearestTarget;
     if (!target) return;
     this.sound.play('sfx_menu', { volume: this.registry.get('sfxVol') ?? 0.5 });
@@ -438,6 +671,10 @@ export default class GameScene extends Phaser.Scene {
     this.player.setVelocity(0, 0);
     if (target.isHideoutChest) {
       this.scene.launch('HideoutChestScene', { inventory: this.inventory, player: this.player, net: this.net });
+    } else if (target.isUpgradeStation) {
+      const upgrades   = { ...(this.player.upgrades ?? {}) };
+      const chestItems = (this.registry.get('chestItems') ?? []).slice();
+      this.scene.launch('HideoutUpgradeScene', { upgrades, chestItems, player: this.player, net: this.net });
     } else {
       this.scene.launch('SearchScene', { target, inventory: this.inventory, player: this.player, net: this.net });
     }

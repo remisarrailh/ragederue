@@ -6,10 +6,10 @@
  *
  * levelConfig fields (all optional):
  *   containers          {Array}   [{x,y,texture}]  Container spawn positions
- *   containerLootTable  {Array}   [{type,weight}]  Container loot weights
- *   corpseLootTable     {Array}   [{type,weight}]  Corpse loot weights
- *   containerItemCount  {object}  {min,max}        Items per container
- *   corpseItemCount     {object}  {min,max}        Items per corpse
+ *   containerLootTables {object}  { texKey: [{type,weight}] }  Loot par type container
+ *   containerItemCounts {object}  { texKey: {min,max} }        Items par type container
+ *   enemyLootTables     {object}  { typeKey: [{type,weight}] } Loot par type ennemi
+ *   enemyItemCounts     {object}  { typeKey: {min,max} }       Items par type ennemi
  *   enemies             {object}  WaveSpawner config (see WaveSpawner.js)
  */
 
@@ -23,23 +23,26 @@ const TICK_MS   = 1000 / TICK_RATE;
 // ── World timer (seconds) ──────────────────────────────────────────────────
 const RUN_TIMER = 600;  // mirrors client lootTable.js
 
-// ── Fallback loot tables (used if level doesn't define its own) ────────────
-const DEFAULT_CONTAINER_LOOT_TABLE = [
-  { type: 'ethereum',  weight: 15 },
-  { type: 'sushi',     weight: 30 },
-  { type: 'pizza',     weight: 20 },
-  { type: 'ice_cream', weight: 35 },
-];
+// ── Fallback loot tables (si levelCfg ne fournit pas les maps) ───────────────
+const DEFAULT_CONTAINER_LOOT_TABLES = {
+  default: [
+    { type: 'sushi',     weight: 30 },
+    { type: 'pizza',     weight: 20 },
+    { type: 'ice_cream', weight: 35 },
+    { type: 'ethereum',  weight: 15 },
+  ],
+};
+const DEFAULT_CONTAINER_ITEM_COUNTS = { default: { min: 1, max: 3 } };
 
-const DEFAULT_CORPSE_LOOT_TABLE = [
-  { type: 'ethereum',  weight: 40 },
-  { type: 'sushi',     weight: 25 },
-  { type: 'ice_cream', weight: 25 },
-  { type: 'pizza',     weight: 10 },
-];
-
-const DEFAULT_CONTAINER_ITEM_COUNT = { min: 1, max: 3 };
-const DEFAULT_CORPSE_ITEM_COUNT    = { min: 1, max: 2 };
+const DEFAULT_ENEMY_LOOT_TABLES = {
+  default: [
+    { type: 'ethereum',  weight: 40 },
+    { type: 'sushi',     weight: 25 },
+    { type: 'ice_cream', weight: 25 },
+    { type: 'pizza',     weight: 10 },
+  ],
+};
+const DEFAULT_ENEMY_ITEM_COUNTS = { default: { min: 1, max: 2 } };
 
 // ── Fallback container positions (used if level doesn't define its own) ────
 const DEFAULT_CONTAINER_SPAWNS = [
@@ -78,11 +81,11 @@ class Room {
     this.name = name;
 
     // ── Per-level config (with fallbacks) ────────────────────────────────
-    this._containerSpawns    = levelCfg.containers         || DEFAULT_CONTAINER_SPAWNS;
-    this._containerLootTable = levelCfg.containerLootTable || DEFAULT_CONTAINER_LOOT_TABLE;
-    this._corpseLootTable    = levelCfg.corpseLootTable    || DEFAULT_CORPSE_LOOT_TABLE;
-    this._containerItemCount = levelCfg.containerItemCount || DEFAULT_CONTAINER_ITEM_COUNT;
-    this._corpseItemCount    = levelCfg.corpseItemCount    || DEFAULT_CORPSE_ITEM_COUNT;
+    this._containerSpawns    = levelCfg.containers          || DEFAULT_CONTAINER_SPAWNS;
+    this._containerLootTables = levelCfg.containerLootTables || DEFAULT_CONTAINER_LOOT_TABLES;
+    this._containerItemCounts = levelCfg.containerItemCounts || DEFAULT_CONTAINER_ITEM_COUNTS;
+    this._enemyLootTables     = levelCfg.enemyLootTables     || DEFAULT_ENEMY_LOOT_TABLES;
+    this._enemyItemCounts     = levelCfg.enemyItemCounts     || DEFAULT_ENEMY_ITEM_COUNTS;
 
     /** @type {Map<number, object>} playerId → player */
     this.players = new Map();
@@ -152,8 +155,9 @@ class Room {
     if (enemy.state === 'dead') return;
     const died = enemy.takeHit(damage, knockback, fromX);
     if (died) {
-      const count = randBetween(this._corpseItemCount.min, this._corpseItemCount.max);
-      enemy.lootItems = rollLoot(this._corpseLootTable, count);
+      const eTable = this._enemyLootTables[enemy.type] ?? this._enemyLootTables['default'] ?? [];
+      const eCnt   = this._enemyItemCounts[enemy.type] ?? this._enemyItemCounts['default'] ?? { min: 0, max: 2 };
+      enemy.lootItems = rollLoot(eTable, randBetween(eCnt.min, eCnt.max));
       this.broadcaster.broadcast(Protocol.encodeLootData(1, enemy.netId, enemy.lootItems));
     }
   }
@@ -321,8 +325,10 @@ class Room {
 
   _generateContainerLoot() {
     for (let i = 0; i < this._containerSpawns.length; i++) {
-      const count = randBetween(this._containerItemCount.min, this._containerItemCount.max);
-      const loot  = rollLoot(this._containerLootTable, count);
+      const tex   = this._containerSpawns[i].texture ?? 'default';
+      const table = this._containerLootTables[tex] ?? this._containerLootTables['default'] ?? [];
+      const cnt   = this._containerItemCounts[tex] ?? this._containerItemCounts['default'] ?? { min: 1, max: 3 };
+      const loot  = rollLoot(table, randBetween(cnt.min, cnt.max));
       this.containerLoot.push({ id: i, loot });
     }
     console.log(`[Room ${this.name}] Generated loot for ${this.containerLoot.length} containers`);

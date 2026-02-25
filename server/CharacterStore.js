@@ -39,6 +39,10 @@ module.exports = {
       skills: {
         punchSkill: 0, kickSkill: 0, jabSkill: 0,
         moveSkill: 0, lootSkill: 0, healSkill: 0, eatSkill: 0,
+        runSkill: 0, jumpSkill: 0,
+      },
+      upgrades: {
+        cuisine: 0, filtration: 0, coffre: 0, gym: 0, atelier: 0,
       },
     };
     data.characters.push(char);
@@ -53,6 +57,34 @@ module.exports = {
       char.chestItems = items;
       save(data);
     }
+  },
+
+  getUpgrades(id) {
+    const char = load().characters.find(c => c.id === id);
+    return char?.upgrades ?? { cuisine: 0, filtration: 0, coffre: 0, gym: 0, atelier: 0 };
+  },
+
+  /** Increment one upgrade level and deduct items from chestItems. */
+  buildUpgrade(id, upgradeId, cost) {
+    const data = load();
+    const char = data.characters.find(c => c.id === id);
+    if (!char) return null;
+    if (!char.upgrades) char.upgrades = { cuisine: 0, filtration: 0, coffre: 0, gym: 0, atelier: 0 };
+
+    // Deduct cost items from chestItems
+    const chest = [...(char.chestItems ?? [])];
+    for (const [item, qty] of Object.entries(cost)) {
+      let needed = qty;
+      for (let i = chest.length - 1; i >= 0 && needed > 0; i--) {
+        if (chest[i] === item) { chest.splice(i, 1); needed--; }
+      }
+      if (needed > 0) return null;  // Not enough items
+    }
+
+    char.chestItems = chest;
+    char.upgrades[upgradeId] = (char.upgrades[upgradeId] ?? 0) + 1;
+    save(data);
+    return { upgrades: char.upgrades, chestItems: char.chestItems };
   },
 
   updateSkills(id, gains) {
