@@ -1,18 +1,9 @@
-
-
 # Assets
 
-* Bouteille d'eau XXX
 * Boisson canette
-* Vis XXX
-* Clou XXX
-* Planche en bois XXX
-* Tuyau XXX
-* Atelier
 * Bandages
 * Attelles
-* Kit soin	
-* Boite à outils
+* Kit soin
 
 # Global
 

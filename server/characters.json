@@ -37,13 +37,13 @@
       ],
       "createdAt": 1771879955369,
       "skills": {
-        "moveSkill": 1210,
-        "punchSkill": 5040,
+        "moveSkill": 1277,
+        "punchSkill": 5150,
         "kickSkill": 2380,
-        "lootSkill": 650,
+        "lootSkill": 720,
         "healSkill": 619,
         "eatSkill": 185,
-        "jabSkill": 3360
+        "jabSkill": 3370
       }
     },
     {

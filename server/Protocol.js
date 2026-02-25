@@ -3,55 +3,54 @@
  * Mirrors js/network/NetProtocol.js but in CommonJS for Node.
  */
 
-// ─── Message types ──────────────────────────────────────────────────────────
-const C_JOIN          = 0x01;
-const C_PLAYER_STATE  = 0x02;
-const C_ATTACK        = 0x03;
-const C_CHANGE_MAP    = 0x05;
-const C_HIT_ENEMY     = 0x07;
-const C_TAKE_ITEM     = 0x08;
-const C_CHAR_LIST     = 0x10;  // C→S : demande liste des personnages
-const C_CHAR_SELECT   = 0x11;  // C→S : sélectionne (action=0) ou crée (action=1) un personnage
-const C_CHAR_DELETE   = 0x12;  // C→S : supprime un personnage
-const C_CHEST_SAVE    = 0x13;  // C→S : sauvegarde le contenu du coffre
-const C_SKILL_GAIN    = 0x14;  // C→S : XP gagné pour une compétence
-const C_UPGRADE_BUILD = 0x15;  // C→S : construire prochain niveau d'une amélioration
-const C_REVIVE_PLAYER = 0x16;  // C→S : revive un joueur à terre (targetPlayerId u16)
 
-const S_WELCOME       = 0x80;
-const S_ROOM_SNAPSHOT = 0x81;
-const S_PLAYER_JOIN   = 0x82;
-const S_PLAYER_LEAVE  = 0x83;
-const S_DAMAGE        = 0x84;
-const S_ENEMY_SNAPSHOT = 0x85;
-const S_LOOT_DATA      = 0x86;
-const S_WORLD_RESET    = 0x87;
-const S_TIMER_SYNC     = 0x88;
-const S_CHAR_LIST      = 0x90;  // S→C : liste des personnages
-const S_JOIN_REFUSED   = 0x91;  // S→C : personnage déjà en jeu
-const S_CHEST_DATA     = 0x92;  // S→C : contenu du coffre du personnage sélectionné
-const S_SKILLS         = 0x93;  // S→C : état complet des compétences du personnage
-const S_UPGRADES       = 0x94;  // S→C : niveaux des améliorations de la planque
-const S_REVIVE_PLAYER  = 0x95;  // S→C : broadcast revive (targetPlayerId u16)
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
 
-// ─── Item types (shared with client) ────────────────────────────────────────
-const ITEM_TYPES = ['ethereum', 'sushi', 'pizza', 'ice_cream'];
+/*
+ Retrieve data from NetConstants.js and lootTable.js to avoid duplication.
+ The server needs the same constants and item type definitions to encode/decode messages,
+*/
+
+// 1. Read NetConstants.js
+const constantsPath = path.join(__dirname, '..', 'js', 'network', 'NetConstants.js');
+const constSrc = fs.readFileSync(constantsPath, 'utf8').replace(/^export\s+const\s+/gm, 'var ');
+const constCtx = {};
+vm.runInNewContext(constSrc, constCtx);
+
+// Extract variables from NetConstants.js
+const {
+  C_JOIN, C_PLAYER_STATE, C_ATTACK, C_CHANGE_MAP, C_HIT_ENEMY, C_TAKE_ITEM,
+  C_CHAR_LIST, C_CHAR_SELECT, C_CHAR_DELETE, C_CHEST_SAVE, C_SKILL_GAIN, C_UPGRADE_BUILD,
+  C_REVIVE_PLAYER,
+  S_WELCOME, S_ROOM_SNAPSHOT, S_PLAYER_JOIN, S_PLAYER_LEAVE, S_DAMAGE,
+  S_ENEMY_SNAPSHOT, S_LOOT_DATA, S_WORLD_RESET, S_TIMER_SYNC,
+  S_CHAR_LIST, S_JOIN_REFUSED, S_CHEST_DATA, S_SKILLS, S_UPGRADES, S_REVIVE_PLAYER,
+  STATES, ENEMY_STATES
+} = constCtx;
+
+// Extract item types from lootTable.js
+const lootPath = path.join(__dirname, '..', 'js', 'config', 'lootTable.js');
+const lootSrc = fs.readFileSync(lootPath, 'utf8')
+  .replace(/^export\s+const\s+/gm, 'var ')
+  .replace(/^export\s+function\s+/gm, 'function ');
+const lootCtx = {};
+vm.runInNewContext(lootSrc, lootCtx);
+
+// Extract item types dynamically
+const ITEM_TYPES = Object.keys(lootCtx.ITEM_DEFS || {});
 const itemTypeToIdx = {};
 ITEM_TYPES.forEach((t, i) => { itemTypeToIdx[t] = i; });
 
-// ─── State enum ─────────────────────────────────────────────────────────────
-const STATES = [
-  'idle', 'walk', 'punch', 'kick', 'jab',
-  'jump', 'jump_kick', 'hurt', 'dead',
-];
+// Convert states to index maps for encoding/decoding
 const stateToIdx = {};
 STATES.forEach((s, i) => { stateToIdx[s] = i; });
 
-const ENEMY_STATES = [
-  'patrol', 'chase', 'attack', 'hitstun', 'knockdown', 'dead',
-];
+// Enemy states have their own indices since they are encoded differently
 const enemyStateToIdx = {};
 ENEMY_STATES.forEach((s, i) => { enemyStateToIdx[s] = i; });
+
 
 // ─── Decode helpers ─────────────────────────────────────────────────────────
 

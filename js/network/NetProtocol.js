@@ -7,61 +7,47 @@
  * This file is used by BOTH the client (ES module) and the server (CommonJS).
  * The server copies the constants; the client imports this file directly.
  */
+import * as constants from './NetConstants.js';
+export * from './NetConstants.js'; // Importe et ré-exporte toutes les constantes !
+import { ITEM_DEFS } from '../config/lootTable.js';
 
 // ─── Message types ──────────────────────────────────────────────────────────
 // Client → Server
-export const C_JOIN          = 0x01;
-export const C_PLAYER_STATE  = 0x02;
-export const C_ATTACK        = 0x03;
-export const C_CHANGE_MAP    = 0x05;
-export const C_HIT_ENEMY     = 0x07;
-export const C_TAKE_ITEM     = 0x08;
-export const C_CHAR_LIST     = 0x10;  // Request character list
-export const C_CHAR_SELECT   = 0x11;  // Select (action=0) or create (action=1) a character
-export const C_CHAR_DELETE   = 0x12;  // Delete a character
-export const C_CHEST_SAVE    = 0x13;  // Save chest contents to server
-export const C_SKILL_GAIN    = 0x14;  // Notify server of XP gain for a skill
-export const C_UPGRADE_BUILD = 0x15;  // Build next level of a hideout upgrade
-export const C_REVIVE_PLAYER = 0x16;  // Revive a downed player (targetPlayerId)
-
-// Server → Client
-export const S_WELCOME       = 0x80;
-export const S_ROOM_SNAPSHOT  = 0x81;
-export const S_PLAYER_JOIN   = 0x82;
-export const S_PLAYER_LEAVE  = 0x83;
-export const S_DAMAGE        = 0x84;
-export const S_ENEMY_SNAPSHOT = 0x85;
-export const S_LOOT_DATA      = 0x86;
-export const S_WORLD_RESET    = 0x87;
-export const S_TIMER_SYNC     = 0x88;
-export const S_CHAR_LIST      = 0x90;  // Character list response
-export const S_JOIN_REFUSED   = 0x91;  // Character already in-game
-export const S_CHEST_DATA     = 0x92;  // Chest contents after character selection
-export const S_SKILLS         = 0x93;  // Full skill state for the selected character
-export const S_UPGRADES       = 0x94;  // Hideout upgrade levels for the selected character
-
+const {
+  C_JOIN, C_PLAYER_STATE, C_ATTACK, C_CHANGE_MAP, C_HIT_ENEMY, C_TAKE_ITEM,
+  C_CHAR_LIST, C_CHAR_SELECT, C_CHAR_DELETE, C_CHEST_SAVE, C_SKILL_GAIN, C_UPGRADE_BUILD,
+  C_REVIVE_PLAYER,
+  S_WELCOME, S_ROOM_SNAPSHOT, S_PLAYER_JOIN, S_PLAYER_LEAVE, S_DAMAGE,
+  S_ENEMY_SNAPSHOT, S_LOOT_DATA, S_WORLD_RESET, S_TIMER_SYNC,
+  S_CHAR_LIST, S_JOIN_REFUSED, S_CHEST_DATA, S_SKILLS, S_UPGRADES, S_REVIVE_PLAYER,
+  STATES, ENEMY_STATES
+} = constants;
 // ─── Item types (shared with server) ────────────────────────────────────────
-export const ITEM_TYPES = ['ethereum', 'sushi', 'pizza', 'ice_cream'];
+export const ITEM_TYPES = Object.keys(ITEM_DEFS);
 
 // ─── State enum (fits in 1 byte) ────────────────────────────────────────────
-export const STATES = [
-  'idle', 'walk', 'punch', 'kick', 'jab',
-  'jump', 'jump_kick', 'hurt', 'dead',
-];
+// Note: the actual state strings are not sent over the network, only their indices.
 const stateToIdx = {};
 STATES.forEach((s, i) => { stateToIdx[s] = i; });
 
 // ─── Enemy state enum ──────────────────────────────────────────────────────
-export const ENEMY_STATES = [
-  'patrol', 'chase', 'attack', 'hitstun', 'knockdown', 'dead',
-];
+// Même chose pour les états d'ennemis
 const enemyStateToIdx = {};
 ENEMY_STATES.forEach((s, i) => { enemyStateToIdx[s] = i; });
 
 // ─── Encode helpers ─────────────────────────────────────────────────────────
 
 /**
- * C_JOIN: type(1) + nameLen(1) + name(N) + roomLen(1) + room(M) + charIdLen(1) + charId(K)
+  * Description: Message sent by client to join a room. Contains the player's name, the room they want to join, and optionally a character ID if they are selecting an existing character.
+  *
+  * C_JOIN: type(1) + nameLen(1) + name(N) + roomLen(1) + room(M) + charIdLen(1) + charId(K)
+  * charId is optional and can be empty (len=0) if not selecting a character at join.
+  * Total: 3 + N + M + K bytes
+  * Note: we use TextEncoder which produces UTF-8, so names can contain non-ASCII characters without issues. The server will decode using TextDecoder accordingly.
+  * The protocol is designed to be compact and efficient, using binary encoding and fixed-size fields where possible, while still allowing for variable-length strings for names and room IDs.
+  * This function can be used both by the client (to encode join requests) and by the server (to parse them). The server should decode the incoming buffer using a corresponding decodeJoin function that reads the lengths and extracts the strings accordingly.
+  * Example usage:
+  * const joinMsg = encodeJoin('Alice', 'Lobby1', 'char123');
  */
 export function encodeJoin(name, room, charId = '') {
   const nameBytes   = new TextEncoder().encode(name);
@@ -82,9 +68,14 @@ export function encodeJoin(name, room, charId = '') {
 }
 
 /**
+ * Description: Message sent by client to update player state (position, velocity, action state, facing direction, and HP).
+ *
  * C_PLAYER_STATE: type(1) + x(f32) + y(f32) + velX(i16) + velY(i16)
  *   + state(u8) + packed[facing(1bit)|hp(7bits)](u8)
  * Total: 15 bytes
+ * The state field is an index into the predefined STATES array, allowing for up to 256 distinct states. The facing direction is packed into the highest bit of the last byte, with 0 representing facing right and 1 representing facing left. The remaining 7 bits of that byte are used to encode the player's HP, allowing for a maximum of 127 HP to be represented in this compact format. This design allows for efficient transmission of player state updates while minimizing bandwidth usage.
+ * Example usage:
+ * const stateMsg = encodePlayerState(100.5, 200.75, 1.5, 0, 'walk', 1, 85);
  */
 export function encodePlayerState(x, y, velX, velY, state, facing, hp) {
   const buf = new ArrayBuffer(15);
@@ -101,8 +92,12 @@ export function encodePlayerState(x, y, velX, velY, state, facing, hp) {
 }
 
 /**
+ * Description: Decodes a C_PLAYER_STATE message from a buffer and returns an object with the player's state information. The buffer should be at least 15 bytes long and formatted according to the C_PLAYER_STATE specification.
+ *
  * Decode C_PLAYER_STATE (15 bytes)
- */
+ * Example usage:
+ * const playerState = decodePlayerState(receivedBuffer); 
+*/
 export function decodePlayerState(buf, offset = 1) {
   const v = new DataView(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
   const x    = v.getFloat32(offset, true);
@@ -117,7 +112,11 @@ export function decodePlayerState(buf, offset = 1) {
 }
 
 /**
+ * Description: Message sent by server to welcome a new player after they join a room. Contains the assigned player ID.
  * S_WELCOME: type(1) + playerId(u16)
+ * Total: 3 bytes
+ * Example usage:
+ * const welcomeMsg = encodeWelcome(12345); // Server encodes welcome message with player ID 12345
  */
 export function encodeWelcome(playerId) {
   const buf = new ArrayBuffer(3);
@@ -133,8 +132,11 @@ export function decodeWelcome(buf) {
 }
 
 /**
+ * Description: Message sent by server to all players in a room to provide a snapshot of the current state of all players. Contains an array of player states, each with their ID, position, velocity, action state, facing direction, and HP.
  * S_ROOM_SNAPSHOT: type(1) + count(u8) + [playerId(u16) + state(14 bytes)] * count
  * Total: 1 + 1 + count * 16
+ * Example usage:
+ * const snapshotMsg = encodeRoomSnapshot(players); // Server encodes snapshot message with current player states
  */
 export function encodeRoomSnapshot(players) {
   const count = players.length;
@@ -178,7 +180,11 @@ export function decodeRoomSnapshot(buf) {
 }
 
 /**
+ * Description: Message sent by server to all players in a room when a new player joins. Contains the new player's ID and name.
  * S_PLAYER_JOIN: type(1) + id(u16) + nameLen(u8) + name(N)
+ * Total: 3 + N bytes
+ * Example usage:
+ * const joinMsg = encodePlayerJoin(12345, 'Alice'); // Server encodes player join message for new player with ID 12345 and name "Alice"
  */
 export function encodePlayerJoin(id, name) {
   const nameBytes = new TextEncoder().encode(name);
@@ -202,7 +208,12 @@ export function decodePlayerJoin(buf) {
 }
 
 /**
+ * Description: Message sent by server to all players in a room when a player leaves. Contains the ID of the player who left.
+ *
  * S_PLAYER_LEAVE: type(1) + id(u16)
+ * Total: 3 bytes
+ * Example usage:
+ * const leaveMsg = encodePlayerLeave(12345); // Server encodes player leave message for player with ID 12345
  */
 export function encodePlayerLeave(id) {
   const buf = new ArrayBuffer(3);
@@ -228,8 +239,12 @@ export function getMsgType(buf) {
 // ─── Enemy messages ─────────────────────────────────────────────────────────
 
 /**
+ * Description: Message sent by client when they hit an enemy. Contains the enemy's network ID, the damage dealt, the knockback applied, and the X coordinate from which the attack came (used for hit reactions).
+ * 
  * C_TAKE_ITEM: type(1) + targetKind(u8) + targetId(u16) + itemIdx(u8)
  * Total: 5 bytes
+ * Example usage:
+ * const takeItemMsg = encodeTakeItem(0, 12345, 1); // Client encodes take item message for targetKind 0, targetId 12345, itemIdx 1
  */
 export function encodeTakeItem(targetKind, targetId, itemIdx) {
   const buf = new ArrayBuffer(5);
@@ -242,8 +257,12 @@ export function encodeTakeItem(targetKind, targetId, itemIdx) {
 }
 
 /**
+ * Description: Message sent by client when they hit an enemy. Contains the enemy's network ID, the damage dealt, the knockback applied, and the X coordinate from which the attack came (used for hit reactions).
+ * 
  * C_HIT_ENEMY: type(1) + enemyNetId(u16) + damage(u8) + knockback(u8) + fromX(f32)
  * Total: 9 bytes
+ * Example usage:
+ * const hitEnemyMsg = encodeHitEnemy(12345, 50, 10, 100.0); // Client encodes hit enemy message for enemyNetId 12345, damage 50, knockback 10, fromX 100.0
  */
 export function encodeHitEnemy(enemyNetId, damage, knockback, fromX) {
   const buf = new ArrayBuffer(9);
@@ -257,12 +276,20 @@ export function encodeHitEnemy(enemyNetId, damage, knockback, fromX) {
 }
 
 /**
+ * Description: Message sent by server to all players in a room to provide a snapshot of the current state of all enemies. Contains an array of enemy states, each with their network ID, position, HP, action state, and facing direction.
+ * 
  * Decode S_ENEMY_SNAPSHOT (same format as old enemy states):
  * type(1) + count(u8) + [netId(u16) + x(f32) + y(f32) + hp(u8) + stateIdx(u8) + facing(u8)] * count
+ * Total: 2 + count * 11 bytes
+ * Example usage:
+ * const enemySnapshot = decodeEnemySnapshot(receivedBuffer);
  */
 /**
  * Decode S_LOOT_DATA:
  * type(1) + targetKind(u8) + targetId(u16) + count(u8) + [itemIdx(u8)]*count
+ * Total: 5 + count bytes
+ * Example usage:
+ * const lootData = decodeLootData(receivedBuffer);
  */
 export function decodeLootData(buf) {
   const v = new DataView(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
@@ -278,7 +305,11 @@ export function decodeLootData(buf) {
 }
 
 /**
+ * Description: Message sent by server to all players in a room to synchronize the remaining time on the run timer. Contains the remaining time in seconds as a 32-bit float.
  * Decode S_WORLD_RESET / S_TIMER_SYNC: type(1) + remainingTime(f32)
+ * Total: 5 bytes
+ * Example usage:
+ * const timerMsg = decodeTimerMsg(receivedBuffer);
  */
 export function decodeTimerMsg(buf) {
   const v = new DataView(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
@@ -411,7 +442,6 @@ export function encodeRevivePlayer(targetPlayerId) {
 }
 
 /** S_REVIVE_PLAYER: type(1) + targetPlayerId(u16) — broadcast to room */
-export const S_REVIVE_PLAYER = 0x95;
 export function encodeReviveMsg(targetPlayerId) {
   const buf = new ArrayBuffer(3);
   const v = new DataView(buf);
