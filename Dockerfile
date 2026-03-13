@@ -9,8 +9,7 @@ RUN npm ci --omit=dev
 
 # Copy server code only (client is served separately)
 COPY server/ ./server/
-COPY js/config/lootTable.js ./js/config/lootTable.js
-COPY js/config/waveDefs.json ./js/config/waveDefs.json
+COPY js/config/ ./js/config/
 
 EXPOSE 9000
 

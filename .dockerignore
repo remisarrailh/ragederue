@@ -1,8 +1,7 @@
 node_modules
 assets
 js
-!js/config/lootTable.js
-!js/config/waveDefs.json
+!js/config/
 index.html
 plan.md
 tmpclaude-*
