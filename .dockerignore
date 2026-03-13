@@ -1,6 +1,7 @@
 node_modules
 assets
 js
+!js/config/lootTable.js
 index.html
 plan.md
 tmpclaude-*
