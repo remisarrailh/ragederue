@@ -19,8 +19,8 @@ export default class RemotePlayer extends Phaser.Physics.Arcade.Sprite {
     scene.add.existing(this);
     scene.physics.add.existing(this);
 
-    this.body.setSize(28, 40);
-    this.body.setOffset(34, 20);
+    this.body.setSize(24, 14);
+    this.body.setOffset(38, 25);
 
     // ── Identity ──────────────────────────────────────────────────────────
     this.netId  = id;

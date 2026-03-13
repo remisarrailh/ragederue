@@ -6,11 +6,15 @@
  * Accepts a levelConfig object from js/config/levels.js.
  */
 import {
-  GAME_W, GAME_H, LANE_TOP, LANE_BOTTOM, DEBUG_DEPTH
+  GAME_W, GAME_H, LANE_TOP, LANE_BOTTOM, DEBUG_DEPTH, DEBUG_HITBOXES
 } from '../../config/constants.js';
+import { getPropDef } from '../../config/propDefs.js';
 
 const SKY_H    = 290;
 const GROUND_Y = 290;
+
+// Épaisseur fallback (en Y) de la bande de collision au sol des props bloquants.
+const BLOCK_DEPTH = 30;
 
 export default class WorldBuilder {
   constructor(scene) {
@@ -20,17 +24,21 @@ export default class WorldBuilder {
     this.bgSpeed       = 0.06;
     this.midSpeed      = 0.25;
     this.blockingGroup = null;
+    this._blockingProps = [];   // { img, px, py, dw, dh, col } pour debug live
   }
 
   /** @param {object} levelConfig  Entry from LEVELS array in js/config/levels.js */
   build(levelConfig) {
     const scene = this.scene;
-    const { parallax, props, transitZones, background } = levelConfig;
-    let { worldW } = levelConfig;
+
+    const config = levelConfig;
+
+    const { parallax, transitZones, background } = config;
+    let { worldW } = config;
 
     // Per-level lane bounds (fallback to global constants)
-    const laneTop    = levelConfig.laneTop    ?? LANE_TOP;
-    const laneBottom = levelConfig.laneBottom ?? LANE_BOTTOM;
+    const laneTop    = config.laneTop    ?? LANE_TOP;
+    const laneBottom = config.laneBottom ?? LANE_BOTTOM;
 
     // Store parallax speeds
     this.bgSpeed  = parallax?.bg  ?? 0.06;
@@ -83,52 +91,98 @@ export default class WorldBuilder {
     // ── Static collision group (blocksPlayer props) ───────────────────────
     this.blockingGroup = scene.physics.add.staticGroup();
 
-    // ── Props (décor + fore) ─────────────────────────────────────────────
-    props.forEach(p => this._placeProp(p));
-
-    // ── Rétrocompatibilité : forePositions legacy ─────────────────────────
-    if (levelConfig.forePositions?.length) {
-      for (const x of levelConfig.forePositions)
-        this._placeProp({ type: 'fore', x, y: laneTop - 20, scale: 1.2 });
+    // ── Objects (unifié : props + containers) ──────────────────────────
+    const objects = config.objects ?? [];
+    for (const obj of objects) {
+      const def = getPropDef(obj.type);
+      if (def.isContainer) {
+        // Le visuel est géré par LootSystem/Container.js.
+        // Mais si blocksPlayer, on crée un corps physique statique invisible.
+        if (def.blocksPlayer) {
+          const img = this._placeObject(obj, def);
+          if (img) img.setAlpha(0);
+        }
+      } else {
+        this._placeObject(obj, def);
+      }
     }
 
     // ── Transit zones ────────────────────────────────────────────────────
-    transitZones.forEach(z => this._buildTransitZone(z, laneTop, laneBottom));
+    (transitZones ?? []).forEach(z => this._buildTransitZone(z, laneTop, laneBottom));
   }
 
   /** Update parallax — call from GameScene.update(). No-op in single-image mode. */
   updateParallax(camX) {
     if (this.bgLayer)  this.bgLayer.tilePositionX  = camX * this.bgSpeed;
     if (this.midLayer) this.midLayer.tilePositionX = camX * this.midSpeed;
+    this._updateBlockingDebug();
+  }
+
+  /** Recalcule les hitboxes des props bloquants si window.BLOCK_DEPTH change. */
+  _updateBlockingDebug() {
+    if (!this._blockingProps.length) return;
+    const bd = window.BLOCK_DEPTH ?? BLOCK_DEPTH;
+    for (const bp of this._blockingProps) {
+      const { img, px, py, dw, dh, col } = bp;
+      const h  = col.height ?? bd;
+      const w  = col.width  ?? dw;
+      const ox = (dw - w) / 2     + (col.offsetX ?? 0);
+      const oy = (dh - h / 2)     + (col.offsetY ?? 0);
+      img.body.setSize(w, h);
+      img.body.setOffset(ox, oy);
+
+      if (img._dbgGfx) {
+        const bx = px - dw * 0.5 + ox;
+        const by = (py - dh) + oy;
+        img._dbgGfx.clear();
+        img._dbgGfx.lineStyle(2, 0xff00ff, 1);
+        img._dbgGfx.strokeRect(bx, by, w, h);
+        img._dbgGfx.fillStyle(0xff00ff, 0.15);
+        img._dbgGfx.fillRect(bx, by, w, h);
+      }
+    }
   }
 
   // ── Private ─────────────────────────────────────────────────────────────
 
   /**
-   * Place a prop in the world.
-   * @param {{ type, x, y, scale?, blocksPlayer?, collision?: {offsetX?,offsetY?,width?,height?} }} p
+   * Place un objet dans le monde.
+   * Scale et collision sont lus depuis PropDef (plus de données par instance).
+   * @param {{ type: string, x: number, y: number }} obj
+   * @param {object} def  PropDef for this type
    */
-  _placeProp(p) {
-    if (p.blocksPlayer) {
+  _placeObject(obj, def) {
+    const scale = def.scale ?? 1;
+
+    if (def.blocksPlayer) {
       // Static physics body — blocks the player
-      const img = this.blockingGroup.create(p.x, p.y, p.type);
-      img.setOrigin(0.5, 1).setScale(p.scale ?? 1).setDepth(p.y);
+      const img = this.blockingGroup.create(obj.x, obj.y, obj.type);
+      img.setOrigin(0.5, 1).setScale(scale).setDepth(obj.y);
       img.refreshBody();
-      // Apply custom collision box if specified
-      if (p.collision) {
-        const col  = p.collision;
-        const w    = col.width  ?? img.displayWidth;
-        const h    = col.height ?? img.displayHeight;
-        const ox   = (img.displayWidth  - w) / 2 + (col.offsetX ?? 0);
-        const oy   = (img.displayHeight - h)     + (col.offsetY ?? 0);
-        img.body.setSize(w, h);
-        img.body.setOffset(ox, oy);
+
+      // Hitbox depuis PropDef (ou fallback BLOCK_DEPTH)
+      const col = def.collision ?? {};
+      const dw  = img.displayWidth;
+      const dh  = img.displayHeight;
+      const h   = col.height ?? BLOCK_DEPTH;
+      const w   = col.width  ?? dw;
+      const ox  = (dw - w) / 2     + (col.offsetX ?? 0);
+      const oy  = (dh - h / 2)     + (col.offsetY ?? 0);
+      img.body.setSize(w, h);
+      img.body.setOffset(ox, oy);
+
+      if (DEBUG_HITBOXES) {
+        img._dbgGfx = this.scene.add.graphics().setDepth(9999);
+        this._blockingProps.push({ img, px: obj.x, py: obj.y, dw, dh, col });
+        if (!window.BLOCK_DEPTH) window.BLOCK_DEPTH = BLOCK_DEPTH;
       }
       return img;
     }
-    const img = this.scene.add.image(p.x, p.y, p.type).setOrigin(0.5, 1);
-    if (p.scale != null) img.setScale(p.scale);
-    img.setDepth(p.y);
+
+    // Non-blocking : simple image
+    const img = this.scene.add.image(obj.x, obj.y, obj.type).setOrigin(0.5, 1);
+    img.setScale(scale);
+    img.setDepth(obj.y);
     return img;
   }
 

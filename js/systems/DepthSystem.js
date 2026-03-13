@@ -1,7 +1,4 @@
-import { LANE_TOP, LANE_BOTTOM, DEBUG_DEPTH } from '../config/constants.js';
-
-/** Fixed scale for all entities (2× original size). */
-const ENTITY_SCALE = 3.0;
+import { LANE_TOP, LANE_BOTTOM, DEBUG_DEPTH, ENTITY_SCALE, SHADOW_W, SHADOW_H, SHADOW_ALPHA } from '../config/constants.js';
 
 /**
  * Update depth-based render order for an entity.
@@ -11,7 +8,11 @@ const ENTITY_SCALE = 3.0;
  */
 export function updateDepth(entity) {
   entity.setScale(ENTITY_SCALE);
-  entity.setDepth(entity.y);
+  // Use the bottom of the sprite (feet) as depth anchor so that sorting is
+  // consistent with static props which are placed with origin (0.5, 1) and
+  // therefore already use their Y as their feet position.
+  const feetY = entity.y + entity.displayHeight * 0.5;
+  entity.setDepth(feetY);
 
   // Shadow ellipse
   if (entity.shadow) {
@@ -19,7 +20,7 @@ export function updateDepth(entity) {
     sh.setPosition(entity.x, entity.y + (entity.displayHeight * 0.45));
     sh.setScale(ENTITY_SCALE, ENTITY_SCALE * 0.3);
     sh.setAlpha(0.35);
-    sh.setDepth(entity.y - 0.5);
+    sh.setDepth(feetY - 0.5);
   }
 }
 
@@ -32,7 +33,7 @@ export function updateDepth(entity) {
  * @returns {Phaser.GameObjects.Ellipse}
  */
 export function createShadow(scene, entity) {
-  const shadow = scene.add.ellipse(entity.x, entity.y, 56, 14, 0x000000, 0.35);
+  const shadow = scene.add.ellipse(entity.x, entity.y, SHADOW_W, SHADOW_H, 0x000000, SHADOW_ALPHA);
   entity.shadow = shadow;
   return shadow;
 }

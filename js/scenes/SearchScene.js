@@ -1,5 +1,6 @@
 import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
 import { ITEM_DEFS, SEARCH_OPEN_MS, SEARCH_IDENTIFY_MS } from '../config/lootTable.js';
+import { KB_BINDS, PAD_BINDS, addDirListeners } from '../config/controls.js';
 
 /**
  * SearchScene — overlay shown when the player interacts with a searchable
@@ -107,22 +108,21 @@ export default class SearchScene extends Phaser.Scene {
     }
 
     // ── Keyboard input ──────────────────────────────────────────────────
-    this.input.keyboard.on('keydown-E',     () => { this.registry.set('inputMode', 'kb'); this._tryClose(); });
-    this.input.keyboard.on('keydown-TAB',   () => { this.registry.set('inputMode', 'kb'); this._tryClose(); });
-    this.input.keyboard.on('keydown-ESC',   () => { this.registry.set('inputMode', 'kb'); this._tryClose(); });
-    this.input.keyboard.on('keydown-UP',    () => { this.registry.set('inputMode', 'kb'); this._moveSel(-1); });
-    this.input.keyboard.on('keydown-DOWN',  () => { this.registry.set('inputMode', 'kb'); this._moveSel(1); });
-    this.input.keyboard.on('keydown-X',     () => { this.registry.set('inputMode', 'kb'); this._takeSelected(); });
-    this.input.keyboard.on('keydown-C',     () => { this.registry.set('inputMode', 'kb'); });
+    this.input.keyboard.on(`keydown-${KB_BINDS.INTERACT}`,  () => { this.registry.set('inputMode', 'kb'); this._tryClose(); });
+    this.input.keyboard.on(`keydown-${KB_BINDS.INVENTORY}`, () => { this.registry.set('inputMode', 'kb'); this._tryClose(); });
+    this.input.keyboard.on(`keydown-${KB_BINDS.CANCEL}`,    () => { this.registry.set('inputMode', 'kb'); this._tryClose(); });
+    addDirListeners(this, { onUp: () => this._moveSel(-1), onDown: () => this._moveSel(1) });
+    this.input.keyboard.on(`keydown-${KB_BINDS.ACCEPT}`,    () => { this.registry.set('inputMode', 'kb'); this._takeSelected(); });
+    this.input.keyboard.on('keydown-C',                      () => { this.registry.set('inputMode', 'kb'); });
 
     // ── Gamepad input ───────────────────────────────────────────────────
     this._gpCooldown = 0;
     this.input.gamepad.on('down', (pad, button) => {
       this.registry.set('inputMode', 'gp');
-      if (button.index === 0) this._takeSelected();   // A / Cross
-      if (button.index === 1) this._tryClose();        // B / Circle → CLOSE
-      if (button.index === 3) this._tryClose();        // Y / Triangle (same key as interact)
-      if (button.index === 8) this._tryClose();        // Select
+      if (button.index === PAD_BINDS.ACCEPT)    this._takeSelected();
+      if (button.index === PAD_BINDS.CANCEL)    this._tryClose();
+      if (button.index === PAD_BINDS.INTERACT)  this._tryClose();
+      if (button.index === PAD_BINDS.INVENTORY) this._tryClose();
     });
   }
 
@@ -168,7 +168,7 @@ export default class SearchScene extends Phaser.Scene {
     const gp = this.registry.get('inputMode') === 'gp';
     this._hint.setText(gp
       ? 'A: take   B: close'
-      : 'X: take   E / TAB: close');
+      : `${KB_BINDS.ACCEPT}: take   ${KB_BINDS.INTERACT} / ${KB_BINDS.INVENTORY}: close`);
   }
 
   // ═══════════════════════════════════════════════════════════════════════

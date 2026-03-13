@@ -8,7 +8,9 @@
       "Bash(grep -n \"S_CHEST_DATA\\\\|C_CHEST_SAVE\\\\|sendChestSave\" /c/Users/remi/Desktop/soronline/js/network/*.js /c/Users/remi/Desktop/soronline/server/*.js)",
       "Bash(xargs grep -l \"craft\\\\|upgrade\\\\|combine\\\\|forge\\\\|recipe\")",
       "Bash(find . -name \"*.js\" -exec grep -l \"LOOT_DEFS\\\\|ITEM_DEFS\" {} ;)",
-      "Bash(node -e \":*)"
+      "Bash(node -e \":*)",
+      "Bash(grep -n \"setupUIControls\\\\|import.*controls\" js/scenes/*.js)",
+      "Bash(grep -n \"setupUIControls\" js/scenes/*.js)"
     ]
   }
 }

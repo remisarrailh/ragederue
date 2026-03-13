@@ -3,14 +3,35 @@
 /**
  * levelConfigs.js — Server-side level configuration.
  *
- * Les containers sont lus dynamiquement depuis js/config/levels/<id>.js
- * afin d'être toujours synchronisés avec ce que l'éditeur a sauvegardé.
+ * Les configs de vague (wave timings, ennemis) sont lues depuis js/config/waveDefs.json.
+ * Les containers sont lus dynamiquement depuis js/config/levels/<id>.js (vm.runInNewContext).
  * Les loot tables sont lues depuis js/config/lootTable.js via vm.
  */
 
-const fs   = require('fs');
-const path = require('path');
-const vm   = require('vm');
+const fs       = require('fs');
+const path     = require('path');
+const vm       = require('vm');
+const WAVE_DEFS = require('../js/config/waveDefs.json');
+
+// ── Lecture de PropDefs (cache singleton) ─────────────────────────────────────
+let _propDefsCache = null;
+function _getPropDefs() {
+  if (_propDefsCache) return _propDefsCache;
+  try {
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'js', 'config', 'propDefs.js'), 'utf8'
+    )
+      .replace(/^export\s+const\s+/gm,    'var ')
+      .replace(/^export\s+function\s+/gm, 'function ');
+    const ctx = {};
+    vm.runInNewContext(src, ctx);
+    _propDefsCache = ctx.PROP_DEFS ?? {};
+  } catch (e) {
+    console.warn('[levelConfigs] Impossible de lire propDefs.js :', e.message);
+    _propDefsCache = {};
+  }
+  return _propDefsCache;
+}
 
 // ── Lecture dynamique des containers depuis le fichier de niveau client ───────
 function _readLevelContainers(levelId) {
@@ -20,9 +41,19 @@ function _readLevelContainers(levelId) {
       .replace(/^export\s+default\s+/m, 'var _level = ');
     const ctx = {};
     vm.runInNewContext(src, ctx);
-    // Exclure les containers spéciaux (coffre planque, établi) — gérés séparément
-    const containers = (ctx._level?.containers ?? [])
-      .filter(c => !c.isHideoutChest && !c.isUpgradeStation);
+
+    const PROP_DEFS = _getPropDefs();
+
+    // Nouveau format : objects[] avec type = clé PropDef.
+    // On garde les containers normaux (isContainer true, pas de specialType).
+    const objects = ctx._level?.objects ?? [];
+    const containers = objects
+      .filter(obj => {
+        const def = PROP_DEFS[obj.type];
+        return def && def.isContainer && !def.specialType;
+      })
+      .map(obj => ({ x: obj.x, y: obj.y, texture: obj.type }));
+
     console.log(`[levelConfigs] ${levelId}: ${containers.length} containers lus depuis le fichier niveau`);
     return containers;
   } catch (e) {
@@ -60,16 +91,7 @@ const LEVEL_CONFIGS = {
   // ── level_01 — Street Shops ─────────────────────────────────────────────
   level_01: {
     containers: _readLevelContainers('level_01'),
-    enemies: {
-      waveIntervalMs: 30_000,
-      waveMin:        1,
-      waveMax:        3,
-      maxEnemies:     5,
-      mapWidth:       10170,
-      strongChance:   0.25,
-      strongHp:       100,
-      strongSpeed:    70,
-    },
+    enemies:    WAVE_DEFS.level_01,
     containerLootTables: LOOT.containerLootTables,
     containerItemCounts: LOOT.containerItemCounts,
     enemyLootTables:     LOOT.enemyLootTables,
@@ -79,16 +101,7 @@ const LEVEL_CONFIGS = {
   // ── level_02 — Bar ──────────────────────────────────────────────────────
   level_02: {
     containers: _readLevelContainers('level_02'),
-    enemies: {
-      waveIntervalMs: 20_000,
-      waveMin:        2,
-      waveMax:        4,
-      maxEnemies:     8,
-      mapWidth:       3005,
-      strongChance:   0.40,
-      strongHp:       120,
-      strongSpeed:    80,
-    },
+    enemies:    WAVE_DEFS.level_02,
     containerLootTables: LOOT.containerLootTables,
     containerItemCounts: LOOT.containerItemCounts,
     enemyLootTables:     LOOT.enemyLootTables,
@@ -98,13 +111,8 @@ const LEVEL_CONFIGS = {
   // ── level_03 — Planque ──────────────────────────────────────────────────
   // Safe zone: no enemies, no random loot (chest is handled separately)
   level_03: {
-    containers: _readLevelContainers('level_03'),
-    enemies: {
-      maxEnemies:    0,
-      waveIntervalMs: 999_999_999,  // effectively never
-      waveMin: 0,
-      waveMax: 0,
-    },
+    containers:         _readLevelContainers('level_03'),
+    enemies:            WAVE_DEFS.level_03,
     containerLootTable: [],
     corpseLootTable:    [],
   },

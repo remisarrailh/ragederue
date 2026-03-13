@@ -138,7 +138,7 @@ export const CONTAINER_LOOT_TABLES = {
   toolbox: [
     { type: 'vis', weight: 40 },
     { type: 'clou', weight: 35 },
-    { type: 'planche', weight: 15 },
+    { type: 'planche', weight: 20 },
     { type: 'tuyau', weight: 5 },
   ],
 };

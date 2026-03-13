@@ -3,23 +3,13 @@
  * Mirrors js/network/NetProtocol.js but in CommonJS for Node.
  */
 
+'use strict';
 
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
-const vm = require('vm');
+const vm   = require('vm');
 
-/*
- Retrieve data from NetConstants.js and lootTable.js to avoid duplication.
- The server needs the same constants and item type definitions to encode/decode messages,
-*/
-
-// 1. Read NetConstants.js
-const constantsPath = path.join(__dirname, '..', 'js', 'network', 'NetConstants.js');
-const constSrc = fs.readFileSync(constantsPath, 'utf8').replace(/^export\s+const\s+/gm, 'var ');
-const constCtx = {};
-vm.runInNewContext(constSrc, constCtx);
-
-// Extract variables from NetConstants.js
+// ── Constantes protocole (miroir CJS de js/network/NetConstants.js) ──────────
 const {
   C_JOIN, C_PLAYER_STATE, C_ATTACK, C_CHANGE_MAP, C_HIT_ENEMY, C_TAKE_ITEM,
   C_CHAR_LIST, C_CHAR_SELECT, C_CHAR_DELETE, C_CHEST_SAVE, C_SKILL_GAIN, C_UPGRADE_BUILD,
@@ -27,10 +17,11 @@ const {
   S_WELCOME, S_ROOM_SNAPSHOT, S_PLAYER_JOIN, S_PLAYER_LEAVE, S_DAMAGE,
   S_ENEMY_SNAPSHOT, S_LOOT_DATA, S_WORLD_RESET, S_TIMER_SYNC,
   S_CHAR_LIST, S_JOIN_REFUSED, S_CHEST_DATA, S_SKILLS, S_UPGRADES, S_REVIVE_PLAYER,
-  STATES, ENEMY_STATES
-} = constCtx;
+  STATES, ENEMY_STATES,
+} = require('./netConstants');
 
-// Extract item types from lootTable.js
+// ── Types d'objets loot (lus dynamiquement via vm pour rester en sync) ───────
+// vm est conservé uniquement ici car lootTable.js évolue avec les nouvelles armes/items.
 const lootPath = path.join(__dirname, '..', 'js', 'config', 'lootTable.js');
 const lootSrc = fs.readFileSync(lootPath, 'utf8')
   .replace(/^export\s+const\s+/gm, 'var ')

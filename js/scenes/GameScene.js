@@ -6,8 +6,8 @@ import Inventory       from '../systems/Inventory.js';
 import NetworkManager  from '../network/NetworkManager.js';
 import { GAME_W, GAME_H, LANE_TOP, LANE_BOTTOM, IS_MOBILE } from '../config/constants.js';
 import { RUN_TIMER }   from '../config/lootTable.js';
+import { SKILL_DEFS }  from '../config/skills.js';
 import { LEVELS } from '../config/levels.js';
-
 import WorldBuilder    from './game/WorldBuilder.js';
 import InputController from './game/InputController.js';
 import NetworkHandlers from './game/NetworkHandlers.js';
@@ -35,10 +35,20 @@ export default class GameScene extends Phaser.Scene {
     // ── Level config ──────────────────────────────────────────────────────
     const levelId = (data && data.levelId) || LEVELS[0].id;
     this._fromEditor = !!(data && data.fromEditor);
-    // If launched from the editor, use the editor's in-memory levels
-    const levelSource = this._fromEditor
-      ? (this.registry.get('editorLevels') || LEVELS)
-      : LEVELS;
+    // Source de niveaux :
+    //  - Depuis éditeur (TEST) : données en mémoire via registry
+    //  - Sinon : localStorage d'abord (mis à jour par SAVE éditeur),
+    //    puis fallback sur les imports statiques
+    let levelSource;
+    if (this._fromEditor) {
+      levelSource = this.registry.get('editorLevels') || LEVELS;
+    } else {
+      try {
+        const raw = localStorage.getItem('RAGEDERUE_editor_levels');
+        if (raw) levelSource = JSON.parse(raw);
+      } catch {}
+      levelSource = levelSource || LEVELS;
+    }
     this._levelSource = levelSource;  // kept for warp label resolution
     this._levelConfig = levelSource.find(l => l.id === levelId) || LEVELS[0];
 
@@ -122,7 +132,7 @@ export default class GameScene extends Phaser.Scene {
     this.inventory = this.registry.get('playerInventory') ?? new Inventory();
     this.registry.set('playerInventory', this.inventory);
     this.lootSystem = new LootSystem(this);
-    this.lootSystem.spawnContainers(this._levelConfig.containers);
+    this.lootSystem.spawnContainers(this._levelConfig.objects ?? []);
 
     // ── Input (wired after player/loot exist so callbacks are valid) ──────
     this.inputCtrl = new InputController(this);
@@ -356,6 +366,7 @@ export default class GameScene extends Phaser.Scene {
 
   // ── Enemy sync (server-authoritative) ────────────────────────────────
   _syncEnemiesFromServer(enemyData) {
+    if (this._fromEditor) return;  // pas d'ennemis en mode éditeur/test
     const seen = new Set();
     for (const data of enemyData) {
       seen.add(data.netId);
@@ -547,7 +558,7 @@ export default class GameScene extends Phaser.Scene {
       // Use the best heal item in the inventory on the ally
       const healItem = [...this.inventory.items]
         .filter(i => i.identified && (i.def.healAmount ?? 0) > 0)
-        .sort((a, b) => (a.def.healAmount ?? 0) - (b.def.healAmount ?? 0))[0];
+        .sort((a, b) => (b.def.healAmount ?? 0) - (a.def.healAmount ?? 0))[0];
       if (healItem) {
         this.inventory.removeItem(healItem);
         // Remote player gains HP (local visual only until server message added)
@@ -566,6 +577,56 @@ export default class GameScene extends Phaser.Scene {
     const tgtWarp  = (tgtLevel.transitZones ?? []).find(z => z.type === 'warp' && z.id === zone.targetWarpId);
     const warpName = tgtWarp ? (tgtWarp.label ?? '') : '';
     return warpName ? `${tgtLevel.name} / ${warpName}` : tgtLevel.name;
+  }
+
+  // ── XP feedback visuel ────────────────────────────────────────────────
+  _showXpFeedback(skillKey, xpGained, newLevel) {
+    const def = SKILL_DEFS.find(s => s.key === skillKey);
+    if (!def || !this.player) return;
+
+    // moveSkill / runSkill : trop fréquent, on n'affiche que les level-ups
+    if (!newLevel && (skillKey === 'moveSkill' || skillKey === 'runSkill')) return;
+
+    // Throttle regular XP : max 1 texte par skill toutes les 800 ms
+    if (!newLevel) {
+      const now = Date.now();
+      if (!this._xpFeedbackLast) this._xpFeedbackLast = {};
+      if (now - (this._xpFeedbackLast[skillKey] ?? 0) < 800) return;
+      this._xpFeedbackLast[skillKey] = now;
+    }
+
+    const x = this.player.x;
+    const y = this.player.y - 70;
+
+    if (newLevel) {
+      // Level-up : grand texte doré + flash caméra
+      const txt = this.add.text(x, y, `⬆ ${def.label} niv.${newLevel} !`, {
+        fontFamily: 'monospace', fontSize: '18px',
+        color: '#ffdd00', stroke: '#000000', strokeThickness: 4,
+      }).setOrigin(0.5, 1).setDepth(950);
+      this.tweens.add({
+        targets: txt, y: y - 50, alpha: 0,
+        duration: 2200, ease: 'Power2',
+        onComplete: () => txt.destroy(),
+      });
+      this.cameras.main.flash(280, 255, 220, 0, false);
+    } else {
+      // XP normal : petit texte vert
+      const txt = this.add.text(x, y, `${def.icon} +${xpGained}`, {
+        fontFamily: 'monospace', fontSize: '12px',
+        color: '#88ff88', stroke: '#000000', strokeThickness: 2,
+      }).setOrigin(0.5, 1).setDepth(940);
+      this.tweens.add({
+        targets: txt, y: y - 28, alpha: 0,
+        duration: 800, ease: 'Power1',
+        onComplete: () => txt.destroy(),
+      });
+    }
+  }
+
+  _stopSubScenes() {
+    ['HUDScene','SearchScene','HideoutChestScene','InventoryScene','PauseScene','MobileControlsScene']
+      .forEach(k => this.scene.stop(k));
   }
 
   // ── Warp to another level ─────────────────────────────────────────────
@@ -589,7 +650,7 @@ export default class GameScene extends Phaser.Scene {
     this.net.onPlayerLeave   = null;
     for (const [, rp] of this.remotePlayers) rp.destroy();
     this.remotePlayers.clear();
-    ['HUDScene','SearchScene','HideoutChestScene','InventoryScene','PauseScene','MobileControlsScene'].forEach(k => this.scene.stop(k));
+    this._stopSubScenes();
     this.player.searching = false;
     this.player.inMenu    = false;
     if (this.bgMusic) { this.bgMusic.stop(); this.bgMusic.destroy(); this.bgMusic = null; }
@@ -612,7 +673,7 @@ export default class GameScene extends Phaser.Scene {
     this.registry.remove('sharedNet');
     for (const [, rp] of this.remotePlayers) rp.destroy();
     this.remotePlayers.clear();
-    ['HUDScene','SearchScene','HideoutChestScene','InventoryScene','PauseScene','MobileControlsScene'].forEach(k => this.scene.stop(k));
+    this._stopSubScenes();
     this.player.searching = false;
     this.player.inMenu    = false;
     if (this.bgMusic) { this.bgMusic.stop(); this.bgMusic.destroy(); this.bgMusic = null; }

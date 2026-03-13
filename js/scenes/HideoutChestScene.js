@@ -1,5 +1,6 @@
 import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
 import { ITEM_DEFS }      from '../config/lootTable.js';
+import { KB_BINDS, PAD_BINDS, addDirListeners } from '../config/controls.js';
 
 /**
  * HideoutChestScene — persistent storage chest for the planque.
@@ -143,24 +144,26 @@ export default class HideoutChestScene extends Phaser.Scene {
     this._updateFocus();
 
     // ── Keyboard input ────────────────────────────────────────────────────
-    this.input.keyboard.on('keydown-UP',    () => { this.registry.set('inputMode', 'kb'); this._moveSel(-1); });
-    this.input.keyboard.on('keydown-DOWN',  () => { this.registry.set('inputMode', 'kb'); this._moveSel(1); });
-    this.input.keyboard.on('keydown-LEFT',  () => { this.registry.set('inputMode', 'kb'); this._switchPanel('player'); });
-    this.input.keyboard.on('keydown-RIGHT', () => { this.registry.set('inputMode', 'kb'); this._switchPanel('chest'); });
-    this.input.keyboard.on('keydown-TAB',   () => { this.registry.set('inputMode', 'kb'); this._togglePanel(); });
-    this.input.keyboard.on('keydown-X',     () => { this.registry.set('inputMode', 'kb'); this._transfer(); });
-    this.input.keyboard.on('keydown-E',     () => { this.registry.set('inputMode', 'kb'); this._doClose(); });
-    this.input.keyboard.on('keydown-ESC',   () => { this.registry.set('inputMode', 'kb'); this._doClose(); });
+    addDirListeners(this, {
+      onUp:    () => this._moveSel(-1),
+      onDown:  () => this._moveSel(1),
+      onLeft:  () => this._switchPanel('player'),
+      onRight: () => this._switchPanel('chest'),
+    });
+    this.input.keyboard.on(`keydown-${KB_BINDS.INVENTORY}`, () => { this.registry.set('inputMode', 'kb'); this._togglePanel(); });
+    this.input.keyboard.on(`keydown-${KB_BINDS.ACCEPT}`,    () => { this.registry.set('inputMode', 'kb'); this._transfer(); });
+    this.input.keyboard.on(`keydown-${KB_BINDS.INTERACT}`,  () => { this.registry.set('inputMode', 'kb'); this._doClose(); });
+    this.input.keyboard.on(`keydown-${KB_BINDS.CANCEL}`,    () => { this.registry.set('inputMode', 'kb'); this._doClose(); });
 
     // ── Gamepad ───────────────────────────────────────────────────────────
     this._gpCooldown = 0;
     this.input.gamepad.on('down', (pad, button) => {
       this.registry.set('inputMode', 'gp');
-      if (button.index === 0) this._transfer();   // A
-      if (button.index === 1) this._doClose();    // B
-      if (button.index === 3) this._doClose();    // Y
-      if (button.index === 4) this._switchPanel('player');  // LB
-      if (button.index === 5) this._switchPanel('chest');   // RB
+      if (button.index === PAD_BINDS.ACCEPT)    this._transfer();
+      if (button.index === PAD_BINDS.CANCEL)    this._doClose();
+      if (button.index === PAD_BINDS.INTERACT)  this._doClose();
+      if (button.index === PAD_BINDS.TAB_LEFT)  this._switchPanel('player');
+      if (button.index === PAD_BINDS.TAB_RIGHT) this._switchPanel('chest');
     });
   }
 
@@ -169,7 +172,7 @@ export default class HideoutChestScene extends Phaser.Scene {
     const gp = this.registry.get('inputMode') === 'gp';
     this._hint.setText(gp
       ? 'A: transférer   B: fermer   LB/RB: panneau'
-      : 'X: transférer   E: fermer   TAB: panneau');
+      : `${KB_BINDS.ACCEPT}: transférer   ${KB_BINDS.INTERACT}: fermer   ${KB_BINDS.INVENTORY}: panneau`);
 
     if (gp && this.input.gamepad.total > 0 && this._gpCooldown <= 0) {
       const pad = this.input.gamepad.getPad(0);

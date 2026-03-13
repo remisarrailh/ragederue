@@ -101,7 +101,12 @@ module.exports = {
 
   getSkills(id) {
     const char = load().characters.find(c => c.id === id);
-    return char?.skills ?? {};
+    const defaults = {
+      punchSkill: 0, kickSkill: 0, jabSkill: 0,
+      moveSkill: 0, lootSkill: 0, healSkill: 0, eatSkill: 0,
+      runSkill: 0, jumpSkill: 0,
+    };
+    return { ...defaults, ...(char?.skills ?? {}) };
   },
 
   delete(id) {

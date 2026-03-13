@@ -8,25 +8,12 @@ import {
   SPRINT_MULTIPLIER, STAMINA_COST_SPRINT, SPRINT_STAMINA_MIN, MOBILE_SPRINT_THRESHOLD,
   PLAYER_MAX_HUNGER, HUNGER_DRAIN_RATE, HUNGER_DAMAGE_RATE,
   PLAYER_MAX_THIRST, THIRST_DRAIN_RATE, THIRST_DAMAGE_RATE,
+  DEBUG_HITBOXES,
 } from '../config/constants.js';
 import { updateDepth, createShadow } from '../systems/DepthSystem.js';
-
-// ── Attack hitbox definitions ─────────────────────────────────────────────
-// { offsetX, offsetY, width, height, damage, knockback }
-// offsetX is in front of the player (flipped automatically when facing left)
-const HITBOXES = {
-  player_punch:     { offsetX: 48, offsetY: -22, w: 52, h: 30, dmg: 15, kb: 130 },
-  player_kick:      { offsetX: 55, offsetY: -16, w: 62, h: 28, dmg: 20, kb: 160 },
-  player_jab:       { offsetX: 42, offsetY: -22, w: 46, h: 28, dmg: 10, kb: 95  },
-  player_jump_kick: { offsetX: 50, offsetY: -10, w: 60, h: 34, dmg: 25, kb: 200 },
-};
-// Active frame index per attack (1-based, Phaser AnimationFrame.index)
-const ACTIVE_FRAMES = {
-  player_punch:     [2],
-  player_kick:      [2, 3],
-  player_jab:       [2],
-  player_jump_kick: [2],
-};
+import { xpToLevel } from '../config/skills.js';
+import { getUpgradeBonuses } from '../config/upgrades.js';
+import { PLAYER_HITBOXES, PLAYER_ACTIVE_FRAMES } from '../config/combatDefs.js';
 
 export default class Player extends Phaser.Physics.Arcade.Sprite {
   /**
@@ -41,9 +28,17 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     scene.add.existing(this);
     scene.physics.add.existing(this);
 
-    this.body.setSize(28, 40);
-    this.body.setOffset(34, 20);
+    this.body.setSize(24, 9);
+    this.body.setOffset(35, 55);
     this.body.setCollideWorldBounds(true);
+
+    // ── Debug live depuis la console ──────────────────────────────────────
+    // window.PLAYER_BODY = { w, h, ox, oy }  → appliqué chaque frame
+    // window.BLOCK_DEPTH = 30                 → appliqué chaque frame aux props
+    if (DEBUG_HITBOXES) {
+      this._debugGfx = scene.add.graphics().setDepth(9999);
+      window.PLAYER_BODY = { w: 24, h: 9, ox: 35, oy: 55 };
+    }
 
     // ── Stats ──────────────────────────────────────────────────────────────
     this.hp    = PLAYER_MAX_HP;
@@ -123,8 +118,8 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     // ── Hitbox activation on specific attack frames ────────────────────────
     this.on('animationupdate', (anim, frame) => {
       if (!this.combat) return;
-      const hb = HITBOXES[anim.key];
-      const activeFrames = ACTIVE_FRAMES[anim.key];
+      const hb = PLAYER_HITBOXES[anim.key];
+      const activeFrames = PLAYER_ACTIVE_FRAMES[anim.key];
       if (hb && activeFrames && activeFrames.includes(frame.index)) {
         const dmgMult = Phaser.Math.Clamp(this.stamina / this.maxStamina, STAMINA_DMG_MIN_MULT, 1.0);
         const skillMap = { player_punch: 'punchSkill', player_kick: 'kickSkill', player_jab: 'jabSkill', player_jump_kick: 'kickSkill' };
@@ -163,6 +158,22 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
   // ─────────────────────────────────────────────────────── update ──────────
   update(cursors, wasd) {
+    // Debug live : appliquer les valeurs modifiées dans la console + dessiner
+    if (this._debugGfx) {
+      const pb = window.PLAYER_BODY;
+      if (pb) {
+        this.body.setSize(pb.w, pb.h);
+        this.body.setOffset(pb.ox, pb.oy);
+      }
+      this._debugGfx.clear();
+      this._debugGfx.lineStyle(2, 0x00ff00, 1);
+      this._debugGfx.strokeRect(this.body.x, this.body.y, this.body.width, this.body.height);
+      this._debugGfx.fillStyle(0x00ff00, 0.15);
+      this._debugGfx.fillRect(this.body.x, this.body.y, this.body.width, this.body.height);
+    }
+    // Survie (stamina, faim, soif) — tourne même quand gelé (inventory/menu)
+    this._updateSurvival();
+
     // Frozen while searching a container / corpse, in inventory, or in menu
     if (this.searching || this.inInventory || this.inMenu) {
       this.setVelocity(0, 0);
@@ -171,6 +182,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
         this.play('player_idle', true);
       }
       this._wasFrozen = true;
+      updateDepth(this);
       return;
     }
 
@@ -194,7 +206,6 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     }
 
     this._handleAttackInput();
-    this._updateSurvival();
     updateDepth(this);
   }
 
@@ -373,9 +384,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
     // ── Mode Planque : regen HP / faim / soif automatique ────────────────
     if (this.scene._levelConfig?.isPlanque) {
-      const ups           = this.upgrades ?? {};
-      const hungerMult    = [1, 2, 3.5, 6][ups.cuisine    ?? 0] ?? 1;
-      const thirstMult    = [1, 2, 3.5, 6][ups.filtration ?? 0] ?? 1;
+      const { hungerRegenMult: hungerMult, thirstRegenMult: thirstMult } = getUpgradeBonuses(this.upgrades ?? {});
       this.hp     = Math.min(this.maxHp,     this.hp     + 5  * dtSec);
       this.hunger = Math.min(this.maxHunger, this.hunger + 10 * dtSec * hungerMult);
       this.thirst = Math.min(this.maxThirst, this.thirst + 15 * dtSec * thirstMult);
@@ -442,14 +451,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   _skillLevel(name) {
-    let xp = this.skills[name] ?? 0;
-    let lvl = 0;
-    while (xp >= Math.round(100 * Math.pow(lvl + 1, 1.5))) {
-      xp -= Math.round(100 * Math.pow(lvl + 1, 1.5));
-      lvl++;
-      if (lvl >= 50) break;
-    }
-    return lvl;
+    return xpToLevel(this.skills[name] ?? 0);
   }
 
   _skillBonus(name) { return 1 + this._skillLevel(name) * 0.02; }

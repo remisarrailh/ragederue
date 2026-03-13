@@ -4,6 +4,7 @@ import {
   LANE_TOP, LANE_BOTTOM
 } from '../config/constants.js';
 import { updateDepth, createShadow } from '../systems/DepthSystem.js';
+import { ENEMY_ATTACK_HITBOX, ENEMY_PATROL_RADIUS } from '../config/combatDefs.js';
 
 export default class Enemy extends Phaser.Physics.Arcade.Sprite {
   /**
@@ -44,8 +45,8 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.netId = 0;
 
     // ── Patrol bounds (stay within 160px of spawn) ────────────────────────
-    this.patrolLeft  = x - 160;
-    this.patrolRight = x + 160;
+    this.patrolLeft  = x - ENEMY_PATROL_RADIUS;
+    this.patrolRight = x + ENEMY_PATROL_RADIUS;
     this.patrolDir   = 1;
 
     // ── Shadow ────────────────────────────────────────────────────────────
@@ -56,8 +57,9 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     // ── Hitbox activation on attack frame ─────────────────────────────────
     this.on('animationupdate', (anim, frame) => {
       if (anim.key === 'enemy_punch' && frame.index === 2) {
+        const hb = ENEMY_ATTACK_HITBOX;
         this.combat.activateHitbox(
-          this, 50, -22, 58, 32, this.attackDamage, this.attackKnockback
+          this, hb.offsetX, hb.offsetY, hb.w, hb.h, this.attackDamage, this.attackKnockback
         );
       }
     });

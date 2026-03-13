@@ -1,7 +1,28 @@
 import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
+import { KB_BINDS, PAD_BINDS } from '../config/controls.js';
 
 const SLIDER_W = 200;
 const SLIDER_H = 6;
+
+const TAB_SOUND    = 0;
+const TAB_CONTROLS = 1;
+
+const CONTROLS_ROWS = [
+  { action: 'Déplacer',   kb: '↑↓←→ / WASD+ZQSD', gp: 'D-Pad / Stick L' },
+  { action: 'Interagir',  kb: null, gp: 'Y / Triangle'  },
+  { action: 'Inventaire', kb: null, gp: 'Select'         },
+  { action: 'Menu',       kb: null, gp: 'Start'          },
+  { action: 'Valider',    kb: null, gp: 'A / Croix'      },
+  { action: 'Sprint',     kb: null, gp: '—'              },
+  { action: 'Tab ←',      kb: '—',  gp: 'LB'             },
+  { action: 'Tab →',      kb: '—',  gp: 'RB'             },
+];
+// Fill in dynamic KB values from KB_BINDS
+CONTROLS_ROWS[1].kb = KB_BINDS.INTERACT;
+CONTROLS_ROWS[2].kb = KB_BINDS.INVENTORY;
+CONTROLS_ROWS[3].kb = KB_BINDS.MENU;
+CONTROLS_ROWS[4].kb = KB_BINDS.ACCEPT;
+CONTROLS_ROWS[5].kb = KB_BINDS.SPRINT;
 
 export default class PauseScene extends Phaser.Scene {
   constructor() {
@@ -11,6 +32,7 @@ export default class PauseScene extends Phaser.Scene {
   create(data) {
     this._fromScene  = (data && data.fromScene)  || 'GameScene';
     this._fromEditor = !!(data && data.fromEditor);
+    this._activeTab  = TAB_SOUND;
 
     // ── Semi-transparent overlay ──────────────────────────────────────────
     this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.7)
@@ -25,7 +47,24 @@ export default class PauseScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5);
 
-    // ── Sound sliders ─────────────────────────────────────────────────────
+    // ── Tab bar ───────────────────────────────────────────────────────────
+    const tabNames = ['SOUND', 'CONTROLS'];
+    const tabSpacing = 140;
+    const tabStartX = GAME_W / 2 - tabSpacing / 2;
+    this._tabLabels = [];
+    for (let i = 0; i < tabNames.length; i++) {
+      const lbl = this.add.text(tabStartX + i * tabSpacing, GAME_H * 0.18, tabNames[i], {
+        fontFamily: 'monospace', fontSize: '14px', color: '#888888',
+        stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      lbl.on('pointerdown', () => this._switchTab(i));
+      this._tabLabels.push(lbl);
+    }
+
+    // ── Tab groups ────────────────────────────────────────────────────────
+    this._tabGroups = [[], []];
+
+    // ── Build SOUND tab ───────────────────────────────────────────────────
     this._sliders = [];
     this._activeSlider = 0;
 
@@ -54,9 +93,16 @@ export default class PauseScene extends Phaser.Scene {
 
     this._highlightSlider();
 
-    this.add.text(GAME_W / 2, GAME_H * 0.68, '▲▼ select slider   ◄► adjust', {
+    const soundHint = this.add.text(GAME_W / 2, GAME_H * 0.68, '▲▼ select slider   ◄► adjust', {
       fontFamily: 'monospace', fontSize: '11px', color: '#666666',
     }).setOrigin(0.5);
+    this._tabGroups[TAB_SOUND].push(soundHint);
+
+    // ── Build CONTROLS tab ────────────────────────────────────────────────
+    this._buildControlsTab();
+
+    // ── Switch to initial tab ─────────────────────────────────────────────
+    this._switchTab(TAB_SOUND);
 
     // ── Bouton retour éditeur (mode test uniquement) ──────────────────────
     if (this._fromEditor) {
@@ -110,17 +156,85 @@ export default class PauseScene extends Phaser.Scene {
 
     // ── Input ─────────────────────────────────────────────────────────────
     this.input.keyboard.on('keydown-ESC', () => this._resume());
-    this._kbUp    = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
-    this._kbDown  = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
-    this._kbLeft  = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
-    this._kbRight = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
+    // Tab switching with LEFT arrow only when on CONTROLS tab (avoids conflict with slider on SOUND tab)
+    this.input.keyboard.on('keydown-LEFT', () => { if (this._activeTab === TAB_CONTROLS) this._switchTab(TAB_SOUND); });
+    // Composite keys: supports arrow keys + WASD (QWERTY) + ZQSD (AZERTY)
+    const kb = this.input.keyboard;
+    const KC = Phaser.Input.Keyboard.KeyCodes;
+    const makeAny = (...codes) => {
+      const keys = codes.map(c => kb.addKey(c));
+      return { get isDown() { return keys.some(k => k.isDown); } };
+    };
+    this._kbUp    = makeAny(KC.UP,    KC.W, KC.Z);
+    this._kbDown  = makeAny(KC.DOWN,  KC.S);
+    this._kbLeft  = makeAny(KC.LEFT,  KC.A, KC.Q);
+    this._kbRight = makeAny(KC.RIGHT, KC.D);
     this._kbCd    = { horiz: 0, vert: 0 };
     if (this._fromEditor) {
       this.input.keyboard.on('keydown-R', () => this._exitToEditor());
     }
     this.input.gamepad.on('down', (pad, button) => {
-      if (button.index === 9) this._resume();  // Start
+      if (button.index === PAD_BINDS.MENU)      this._resume();
+      if (button.index === PAD_BINDS.TAB_LEFT)  this._switchTab(TAB_SOUND);
+      if (button.index === PAD_BINDS.TAB_RIGHT) this._switchTab(TAB_CONTROLS);
     });
+  }
+
+  // ── Tab management ───────────────────────────────────────────────────────
+
+  _switchTab(idx) {
+    this._activeTab = idx;
+    for (let i = 0; i < this._tabGroups.length; i++) {
+      const visible = i === idx;
+      for (const obj of this._tabGroups[i]) obj.setVisible(visible);
+      this._tabLabels[i].setColor(visible ? '#ffcc00' : '#888888');
+    }
+  }
+
+  _buildControlsTab() {
+    const grp = this._tabGroups[TAB_CONTROLS];
+    const cx = GAME_W / 2;
+    const startY = GAME_H * 0.27;
+    const ROW_H = 28;
+
+    // Column headers
+    const hdrKb = this.add.text(cx - 40, startY - 16, 'CLAVIER', {
+      fontFamily: 'monospace', fontSize: '10px', color: '#ff8800',
+    }).setOrigin(0.5);
+    const hdrGp = this.add.text(cx + 100, startY - 16, 'MANETTE', {
+      fontFamily: 'monospace', fontSize: '10px', color: '#ff8800',
+    }).setOrigin(0.5);
+    grp.push(hdrKb, hdrGp);
+
+    for (let i = 0; i < CONTROLS_ROWS.length; i++) {
+      const row = CONTROLS_ROWS[i];
+      const ry = startY + i * ROW_H;
+
+      const bg = this.add.rectangle(cx, ry, 340, ROW_H - 2, i % 2 === 0 ? 0x111122 : 0x0d0d1a, 0.7);
+      grp.push(bg);
+
+      const actionTxt = this.add.text(cx - 155, ry, row.action, {
+        fontFamily: 'monospace', fontSize: '11px', color: '#aaaacc',
+      }).setOrigin(0, 0.5);
+      grp.push(actionTxt);
+
+      const kbTxt = this.add.text(cx - 40, ry, row.kb, {
+        fontFamily: 'monospace', fontSize: '11px', color: '#ffdd88',
+      }).setOrigin(0.5, 0.5);
+      grp.push(kbTxt);
+
+      const gpTxt = this.add.text(cx + 100, ry, row.gp, {
+        fontFamily: 'monospace', fontSize: '11px', color: '#88ddff',
+      }).setOrigin(0.5, 0.5);
+      grp.push(gpTxt);
+    }
+
+    // Footer hint
+    const footer = this.add.text(cx, startY + CONTROLS_ROWS.length * ROW_H + 10,
+      '◄ SOUND   — lecture seule —   CONTROLS ►', {
+        fontFamily: 'monospace', fontSize: '9px', color: '#444466',
+      }).setOrigin(0.5);
+    grp.push(footer);
   }
 
   // ── Slider builder ───────────────────────────────────────────────────────
@@ -178,6 +292,7 @@ export default class PauseScene extends Phaser.Scene {
 
     const state = { vol: saved, applyVol, trackX, lbl, knob, fill, track, pct, hitZone };
     this._sliders.push(state);
+    this._tabGroups[TAB_SOUND].push(lbl, track, fill, knob, pct, hitZone);
     apply(saved);
   }
 
@@ -194,6 +309,7 @@ export default class PauseScene extends Phaser.Scene {
 
   update(time, delta) {
     if (!this._sliders || this._sliders.length === 0) return;
+    if (this._activeTab !== TAB_SOUND) return;
 
     this._kbCd.horiz -= delta;
     this._kbCd.vert  -= delta;

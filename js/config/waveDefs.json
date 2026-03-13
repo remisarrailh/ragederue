@@ -1,0 +1,32 @@
+{
+  "_comment": "Configs de vague ennemies par niveau. Lisibles par le serveur (require) ET le client (Vite import).",
+
+  "level_01": {
+    "waveIntervalMs": 30000,
+    "waveMin":        1,
+    "waveMax":        3,
+    "maxEnemies":     5,
+    "mapWidth":       10170,
+    "strongChance":   0.25,
+    "strongHp":       100,
+    "strongSpeed":    70
+  },
+
+  "level_02": {
+    "waveIntervalMs": 20000,
+    "waveMin":        2,
+    "waveMax":        4,
+    "maxEnemies":     8,
+    "mapWidth":       3005,
+    "strongChance":   0.40,
+    "strongHp":       120,
+    "strongSpeed":    80
+  },
+
+  "level_03": {
+    "waveIntervalMs": 999999999,
+    "waveMin":        0,
+    "waveMax":        0,
+    "maxEnemies":     0
+  }
+}

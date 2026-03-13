@@ -18,6 +18,8 @@
 import { LEVELS }          from '../config/levels.js';
 import { BACKGROUND_KEYS } from '../config/backgrounds.js';
 import { GAME_W, GAME_H, LANE_TOP, LANE_BOTTOM } from '../config/constants.js';
+import { PROP_DEFS, getPropDef } from '../config/propDefs.js';
+import { TextInput } from '../utils/TextInput.js';
 
 // ── Layout ───────────────────────────────────────────────────────────────
 const PAL_W  = 120;   // palette gauche
@@ -27,23 +29,21 @@ const PROP_H = 36;    // properties bas
 const SCROLL_SPEED = 400;
 
 // ── Outils palette ───────────────────────────────────────────────────────
-const TOOLS = [
-  { id: 'select',           label: '↖ SELECT',   color: '#ffffff' },
-  { id: 'sep_props',        label: '─ PROPS ─',  color: '#555555', sep: true },
-  { id: 'prop:car',         label: '  car',      color: '#cccccc', scale: 0.65 },
-  { id: 'prop:barrel',      label: '  barrel',   color: '#cccccc', scale: 0.9  },
-  { id: 'prop:hydrant',     label: '  hydrant',  color: '#cccccc', scale: 0.65 },
-  { id: 'prop:banner-hor1', label: '  banner1',  color: '#cccccc', scale: 0.6  },
-  { id: 'prop:banner-hor2', label: '  banner2',  color: '#cccccc', scale: 0.6  },
-  { id: 'prop:fore',        label: '  fore',     color: '#ffaa44', scale: 1.2  },
-  { id: 'sep_loot',              label: '─ LOOT ─',      color: '#555555', sep: true },
-  { id: 'container:barrel',        label: '  barrel',      color: '#88ff88' },
-  { id: 'container:toolbox',       label: '  toolbox',     color: '#44ddff' },
-  { id: 'container:coffrePlanque', label: '  coffre',      color: '#ffdd66' },
-  { id: 'container:workbench',     label: '  workbench',   color: '#ff9944' },
-  { id: 'sep_zones',        label: '─ ZONES ─',  color: '#555555', sep: true },
-  { id: 'transit',          label: '  transit',  color: '#00ccff' },
-];
+// Build TOOLS from PROP_DEFS — unified palette (no more prop:/container: split)
+function _buildTools() {
+  const tools = [{ id: 'select', label: '↖ SELECT', color: '#ffffff' }];
+  tools.push({ id: 'sep_objects', label: '─ OBJETS ─', color: '#555555', sep: true });
+  for (const [key, def] of Object.entries(PROP_DEFS)) {
+    const color = def.isContainer
+      ? (def.specialType === 'chest' ? '#ffdd66' : def.specialType === 'upgradeStation' ? '#ff9944' : '#88ff88')
+      : (def.blocksPlayer ? '#ff8844' : '#cccccc');
+    tools.push({ id: `obj:${key}`, label: `  ${key}`, color });
+  }
+  tools.push({ id: 'sep_zones', label: '─ ZONES ─', color: '#555555', sep: true });
+  tools.push({ id: 'transit', label: '  transit', color: '#00ccff' });
+  return tools;
+}
+const TOOLS = _buildTools();
 
 const DRAG_THRESHOLD = 5; // px avant de commencer un drag
 const EDITOR_URL     = 'http://localhost:9001';
@@ -69,9 +69,10 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._selected       = null;   // { obj: worldObject }
     this._worldObjects   = [];     // { data, sprite, graphics?, labelText?, type }
     this._bgGraphics     = [];
-    this._capturingInput = false;
+    this._capturingInput = false;   // encore utilisé pour saisie poids loot (numérique)
     this._inputBuffer    = '';
     this._inputTarget    = null;
+    this._activeTextInput = null;   // instance TextInput DOM active (text fields)
     this._exportOverlay       = null;
     this._lootOverlay         = null;   // persistent overlay objects []
     this._lootContentObjs     = [];    // rebuilt on tab switch
@@ -86,6 +87,12 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._zoom           = 1.0;   // zoom caméra [0.25 .. 2.0]
     this._showHitboxes   = false;  // H key toggle
     this._hitboxGraphics = [];     // Graphics objects for all-props hitbox overlay
+    this._propsEdOverlay = null;   // Props Editor overlay objects
+    this._propsEdSelected = null;  // Currently selected texture key in Props Editor
+    this._propsEdDefs    = null;   // Local copy of PROP_DEFS being edited
+    this._propsEdDrag         = null;   // Active drag-scrub state { startY, startVal, onChange, step, textObj }
+    this._propsEdAddingTexture = false; // true quand le champ "ajouter texture" est actif
+    this._editorScrub    = null;   // Drag-scrub pour champs numériques principaux { startY, startVal, step, decimals, textObj, resetColor, onApply, currentVal }
 
     // Layers Phaser : layer.add() retire l'objet de la DisplayList principale
     // → chaque caméra ne voit que son propre layer
@@ -116,23 +123,32 @@ export default class LevelEditorScene extends Phaser.Scene {
       a:     Phaser.Input.Keyboard.KeyCodes.A,
       d:     Phaser.Input.Keyboard.KeyCodes.D,
       q:     Phaser.Input.Keyboard.KeyCodes.Q,   // AZERTY équivalent de A
+      shift: Phaser.Input.Keyboard.KeyCodes.SHIFT,
     });
     this.input.keyboard.on('keydown', e => this._onKeyDown(e));
 
     // ── Souris ───────────────────────────────────────────────────────────
     this.input.on('pointerdown', p => this._onPointerDown(p));
     this.input.on('pointermove', p => this._onPointerMove(p));
-    this.input.on('pointerup',   () => { this._dragActive = false; this._dragOrigin = null; this._resizeMode = null; });
+    this.input.on('pointerup',   () => {
+      if (this._editorScrub) {
+        const sc = this._editorScrub;
+        sc.onApply(sc.currentVal);
+        sc.textObj.setColor(sc.resetColor);
+        this._editorScrub = null;
+      }
+      this._dragActive = false; this._dragOrigin = null; this._resizeMode = null;
+    });
     this.input.on('wheel', (pointer, _gos, _dx, deltaY) => this._onWheel(pointer, deltaY));
   }
 
   // ─────────────────────────────────────────────────────────────────────
   update(_, delta) {
-    if (this._capturingInput) return;
+    if (this._capturingInput || this._activeTextInput) return;
     const dt       = delta / 1000;
     const maxW     = this._levels[this._currentIdx]?.worldW ?? 3840;
     const maxScroll = Math.max(0, maxW - GAME_W / this._zoom);
-    const spd      = SCROLL_SPEED / this._zoom;
+    const spd      = SCROLL_SPEED / this._zoom * (this._keys.shift.isDown ? 3 : 1);
 
     if (this._keys.left.isDown || this._keys.a.isDown || this._keys.q.isDown) {
       this._camScrollX = Math.max(0, this._camScrollX - spd * dt);
@@ -185,9 +201,28 @@ export default class LevelEditorScene extends Phaser.Scene {
       fontFamily: 'monospace', fontSize: '12px', color: '#ffffff',
     }).setOrigin(0.5).setDepth(700).setInteractive({ useHandCursor: true });
     this._uiLayer.add(this._levelNameText);
-    this._levelNameText.on('pointerdown', () => { if (!this._capturingInput) this._startRename(); });
-    this._levelNameText.on('pointerover', () => { if (!this._capturingInput) this._levelNameText.setColor('#ffcc00'); });
-    this._levelNameText.on('pointerout',  () => { if (!this._capturingInput) this._levelNameText.setColor('#ffffff'); });
+    this._levelNameText.on('pointerdown', () => {
+      if (this._activeTextInput || this._capturingInput) return;
+      const level = this._levels[this._currentIdx];
+      this._levelNameText.setColor('#ffcc00');
+      this._activeTextInput = new TextInput(this, {
+        gameX: this._levelNameText.x - 90, gameY: this._levelNameText.y,
+        width: 180, value: level.name ?? '',
+        onCommit: (val) => {
+          if (val) level.name = val;
+          this._levelNameText.setColor('#ffffff');
+          this._activeTextInput = null;
+          this._updateToolbarName();
+        },
+        onCancel: () => {
+          this._levelNameText.setColor('#ffffff');
+          this._activeTextInput = null;
+          this._updateToolbarName();
+        },
+      });
+    });
+    this._levelNameText.on('pointerover', () => { if (!this._activeTextInput) this._levelNameText.setColor('#ffcc00'); });
+    this._levelNameText.on('pointerout',  () => { if (!this._activeTextInput) this._levelNameText.setColor('#ffffff'); });
     this._toolbarBtns.push(this._levelNameText);
 
     this._toolbarBtns.push(this._uiBtn(470, y, '►', '#ff6600', () => { if (this._lootOverlay) return; this._nextLevel(); }, 0.5, 0.5));
@@ -242,6 +277,15 @@ export default class LevelEditorScene extends Phaser.Scene {
     lootBtn.on('pointerdown', () => this._showLootEditor());
     lootBtn.on('pointerover', () => lootBtn.setColor('#ffffff'));
     lootBtn.on('pointerout',  () => lootBtn.setColor('#ff88cc'));
+
+    y += 18;
+    const propsBtn = this.add.text(4, y, '[PROPS ED.]', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#44ccff',
+    }).setDepth(700).setInteractive({ useHandCursor: true });
+    this._uiLayer.add(propsBtn);
+    propsBtn.on('pointerdown', () => this._showPropsEditor());
+    propsBtn.on('pointerover', () => propsBtn.setColor('#ffffff'));
+    propsBtn.on('pointerout',  () => propsBtn.setColor('#44ccff'));
   }
 
   _buildPropsPanel() {
@@ -255,28 +299,9 @@ export default class LevelEditorScene extends Phaser.Scene {
 
     this._fieldX     = this._makeEditField(x0,       py, 'x');
     this._fieldY     = this._makeEditField(x0 + 90,  py, 'y');
-    this._fieldScale = this._makeEditField(x0 + 180, py, 'scale');
 
     this._btnDel = this._uiBtn(GAME_W - LIST_W - 80, py, '[ DEL ]', '#ff4444', () => this._deleteSelected(), 0, 0.5);
     this._btnDel.setVisible(false);
-
-    this._btnBlock = this._uiBtn(x0 + 270, py, '[□ block]', '#555555', () => this._toggleBlocksPlayer(), 0, 0.5);
-    this._btnBlock.setVisible(false);
-
-    this._btnBlockEnemy = this._uiBtn(x0 + 340, py, '[□ enemy]', '#555555', () => this._toggleBlocksEnemy(), 0, 0.5);
-    this._btnBlockEnemy.setVisible(false);
-
-    // ── Toggles container spéciaux ────────────────────────────────────
-    this._btnHideoutChest   = this._uiBtn(x0 + 180, py, '[□ coffre]',    '#555555', () => this._toggleContainerFlag('isHideoutChest'), 0, 0.5);
-    this._btnHideoutChest.setVisible(false);
-    this._btnUpgradeStation = this._uiBtn(x0 + 270, py, '[□ upgrade]',   '#555555', () => this._toggleContainerFlag('isUpgradeStation'), 0, 0.5);
-    this._btnUpgradeStation.setVisible(false);
-
-    // ── Collision box fields (col.w / col.h / col.ox / col.oy) ───────
-    this._fieldColW  = this._makeCollisionField(x0 + 420, py, 'col.w',  'width');
-    this._fieldColH  = this._makeCollisionField(x0 + 490, py, 'col.h',  'height');
-    this._fieldColOX = this._makeCollisionField(x0 + 560, py, 'col.ox', 'offsetX');
-    this._fieldColOY = this._makeCollisionField(x0 + 630, py, 'col.oy', 'offsetY');
 
     this._lblTarget = this.add.text(x0 + 440, py, '', {
       fontFamily: 'monospace', fontSize: '10px', color: '#aaaaaa',
@@ -298,16 +323,16 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._btnWarpR.setVisible(false);
 
     // ── Propriétés niveau (visibles quand rien n'est sélectionné) ────────
-    this._fieldBg  = this._makeLevelField(x0,       py, 'parallax.bg',  'px.bg');
-    this._fieldMid = this._makeLevelField(x0 + 90,  py, 'parallax.mid', 'px.mid');
-    this._fieldWW  = this._makeLevelField(x0 + 180, py, 'worldW',       'worldW');
+    this._fieldBg  = this._makeLevelField(x0,       py, 'parallax.bg',  'px.bg',  0.005, 3);
+    this._fieldMid = this._makeLevelField(x0 + 90,  py, 'parallax.mid', 'px.mid', 0.005, 3);
+    this._fieldWW  = this._makeLevelField(x0 + 180, py, 'worldW',       'worldW', 4,     0);
 
     // ── Limites lane (laneTop / laneBottom) ──────────────────────────
-    this._fieldLaneTop = this._makeLevelField(x0 + 480, py, 'laneTop',    'lane↑');
-    this._fieldLaneBot = this._makeLevelField(x0 + 570, py, 'laneBottom', 'lane↓');
+    this._fieldLaneTop = this._makeLevelField(x0 + 480, py, 'laneTop',    'lane↑', 1, 0);
+    this._fieldLaneBot = this._makeLevelField(x0 + 570, py, 'laneBottom', 'lane↓', 1, 0);
 
     // ── Spawn X ──────────────────────────────────────────────────────
-    this._fieldSpawnX  = this._makeLevelField(x0 + 660, py, 'spawnX',     'spawnX');
+    this._fieldSpawnX  = this._makeLevelField(x0 + 660, py, 'spawnX',     'spawnX', 2, 0);
 
     // ── Transit zone width + height + label ──────────────────────────
     this._fieldWidth  = this._makeEditField(x0 + 180, py, 'width');
@@ -355,38 +380,47 @@ export default class LevelEditorScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     this._uiLayer.add(val);
 
-    val.on('pointerdown', () => {
-      if (this._selected) this._startNumInput(this._selected.obj, field, val);
+    val.on('pointerdown', (pointer) => {
+      if (!this._selected) return;
+      if (field === 'label') {
+        // Champ texte : TextInput DOM natif (copy/paste, vrai curseur)
+        if (this._activeTextInput) { this._activeTextInput.destroy(); this._activeTextInput = null; }
+        val.setColor('#ffff00');
+        this._activeTextInput = new TextInput(this, {
+          gameX: val.x, gameY: val.y, width: 140,
+          value: this._selected.obj.data.label ?? '',
+          onCommit: (newVal) => {
+            if (newVal) {
+              this._selected.obj.data.label = newVal;
+              if (this._selected.obj.type === 'transit') this._refreshTransitWO(this._selected.obj);
+            }
+            val.setColor('#cccccc');
+            this._activeTextInput = null;
+            this._updatePropsPanel();
+            this._updateListPanel();
+          },
+          onCancel: () => {
+            val.setColor('#cccccc');
+            this._activeTextInput = null;
+          },
+        });
+        return;
+      }
+      // Champs numériques : scrub vertical
+      const wo = this._selected.obj;
+      const curVal = parseFloat(wo.data[field] ?? 0) || 0;
+      this._startEditorScrub(pointer, curVal, 1, 0, val, '#cccccc', (newVal) => {
+        this._applyObjectField(wo, field, newVal);
+      });
     });
-    val.on('pointerover', () => val.setColor('#ffffff'));
-    val.on('pointerout',  () => { if (this._inputTarget?.textObj !== val) val.setColor('#cccccc'); });
+    val.on('pointerover', () => { if (this._editorScrub?.textObj !== val) val.setColor('#ffffff'); });
+    val.on('pointerout',  () => { if (this._editorScrub?.textObj !== val && this._activeTextInput === null) val.setColor('#cccccc'); });
 
     return { lbl, val };
   }
 
-  /** Edit field for collision sub-properties (collision.width, .height, .offsetX, .offsetY) */
-  _makeCollisionField(x, y, label, colProp) {
-    const lbl = this.add.text(x, y - 7, label + ':', {
-      fontFamily: 'monospace', fontSize: '9px', color: '#004466',
-    }).setOrigin(0, 0.5).setDepth(700).setVisible(false);
-    this._uiLayer.add(lbl);
 
-    const val = this.add.text(x, y + 6, '---', {
-      fontFamily: 'monospace', fontSize: '11px', color: '#44bbcc',
-    }).setOrigin(0, 0.5).setDepth(700).setVisible(false)
-      .setInteractive({ useHandCursor: true });
-    this._uiLayer.add(val);
-
-    val.on('pointerdown', () => {
-      if (this._selected) this._startCollisionInput(this._selected.obj, colProp, val);
-    });
-    val.on('pointerover', () => val.setColor('#ffffff'));
-    val.on('pointerout',  () => { if (this._inputTarget?.textObj !== val) val.setColor('#44bbcc'); });
-
-    return { lbl, val, colProp };
-  }
-
-  _makeLevelField(x, y, path, label) {
+  _makeLevelField(x, y, path, label, step = 1, decimals = 0) {
     const lbl = this.add.text(x, y - 7, label + ':', {
       fontFamily: 'monospace', fontSize: '9px', color: '#445566',
     }).setOrigin(0, 0.5).setDepth(700).setVisible(false);
@@ -398,9 +432,21 @@ export default class LevelEditorScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     this._uiLayer.add(val);
 
-    val.on('pointerdown', () => this._startLevelPropInput(path, val));
-    val.on('pointerover', () => val.setColor('#ffffff'));
-    val.on('pointerout',  () => { if (this._inputTarget?.textObj !== val) val.setColor('#aaaacc'); });
+    val.on('pointerdown', (pointer) => {
+      const level = this._levels[this._currentIdx];
+      let curVal = 0;
+      if (path === 'parallax.bg')  curVal = level.parallax?.bg  ?? 0.06;
+      if (path === 'parallax.mid') curVal = level.parallax?.mid ?? 0.25;
+      if (path === 'worldW')       curVal = level.worldW   ?? 3840;
+      if (path === 'laneTop')      curVal = level.laneTop    ?? LANE_TOP;
+      if (path === 'laneBottom')   curVal = level.laneBottom ?? LANE_BOTTOM;
+      if (path === 'spawnX')       curVal = level.spawnX     ?? 150;
+      this._startEditorScrub(pointer, curVal, step, decimals, val, '#aaaacc', (newVal) => {
+        this._applyLevelProp(path, newVal);
+      });
+    });
+    val.on('pointerover', () => { if (this._editorScrub?.textObj !== val) val.setColor('#ffffff'); });
+    val.on('pointerout',  () => { if (this._editorScrub?.textObj !== val) val.setColor('#aaaacc'); });
 
     return { lbl, val };
   }
@@ -432,9 +478,8 @@ export default class LevelEditorScene extends Phaser.Scene {
 
     const level = this._levels[this._currentIdx];
     this._buildWorldBackground(level);
-    for (const p of level.props)        this._spawnPropSprite(p);
-    for (const c of level.containers)   this._spawnContainerSprite(c);
-    for (const z of level.transitZones) this._spawnTransitSprite(z);
+    for (const obj of (level.objects ?? []))  this._spawnObjectSprite(obj);
+    for (const z of level.transitZones)       this._spawnTransitSprite(z);
 
     this._updateToolbarName();
     this._updatePropsPanel();
@@ -531,29 +576,28 @@ export default class LevelEditorScene extends Phaser.Scene {
   //  SPAWN OBJETS MONDE (sans setInteractive — hit-test manuel)
   // ══════════════════════════════════════════════════════════════════════
 
-  _spawnPropSprite(data) {
-    if (!this.textures.exists(data.type)) {
-      console.warn(`[Editor] Texture manquante : ${data.type}`);
+  _spawnObjectSprite(data) {
+    const tex = data.type;
+    if (!this.textures.exists(tex)) {
+      console.warn(`[Editor] Texture manquante : ${tex}`);
       return null;
     }
-    const sprite = this.add.image(data.x, data.y, data.type)
-      .setOrigin(0.5, 1).setScale(data.scale ?? 1.0).setDepth(data.y + 10);
-    this._worldLayer.add(sprite);
-    const wo = { data, sprite, type: 'prop' };
-    this._worldObjects.push(wo);
-    return wo;
-  }
-
-  _spawnContainerSprite(data) {
-    const tex   = data.texture ?? 'barrel';
-    const tint  = data.isHideoutChest     ? 0xffdd66
-                : data.isUpgradeStation  ? 0xff9944
-                : data.texture === 'toolbox' ? 0x44ddff
-                : 0x88ff88;
+    const def   = getPropDef(tex);
+    const scale = def.scale ?? 1;
     const sprite = this.add.image(data.x, data.y, tex)
-      .setOrigin(0.5, 1).setScale(1.0).setDepth(data.y + 10).setTint(tint);
+      .setOrigin(0.5, 1).setScale(scale).setDepth(data.y + 10);
+
+    // Tint containers to distinguish them visually
+    if (def.isContainer) {
+      const tint = def.specialType === 'chest'          ? 0xffdd66
+                 : def.specialType === 'upgradeStation' ? 0xff9944
+                 : tex === 'toolbox'                    ? 0x44ddff
+                 : 0x88ff88;
+      sprite.setTint(tint);
+    }
+
     this._worldLayer.add(sprite);
-    const wo = { data, sprite, type: 'container' };
+    const wo = { data, sprite, type: 'object' };
     this._worldObjects.push(wo);
     return wo;
   }
@@ -629,7 +673,7 @@ export default class LevelEditorScene extends Phaser.Scene {
   }
 
   _woContains(wo, wx, wy) {
-    if (wo.type === 'prop' || wo.type === 'container') {
+    if (wo.type === 'object') {
       const s = wo.sprite;
       if (!s || !s.active) return false;
       // bounds en coords monde
@@ -694,24 +738,20 @@ export default class LevelEditorScene extends Phaser.Scene {
       this._selRect.fillStyle(0xff6600, 1);
       this._selRect.fillRect(rx + rw - 2, ry + rh / 2 - 5, 10, 10);
       this._selRect.fillRect(rx + rw / 2 - 5, ry + rh - 2, 10, 10);
-    } else if (wo.type === 'prop') {
-      // Green square: bottom-right corner = uniform scale (applies to all props of same type)
-      this._selRect.fillStyle(0x00ff88, 1);
-      this._selRect.fillRect(rx + rw - 2, ry + rh - 2, 10, 10);
-
-      // Cyan rectangle: actual collision bounds (for blocksPlayer props)
-      if (wo.data.blocksPlayer && wo.sprite) {
-        const col  = wo.data.collision ?? {};
-        const s    = wo.sprite;
-        const dw   = s.displayWidth;
-        const dh   = s.displayHeight;
-        const cw   = col.width   ?? dw;
-        const ch   = col.height  ?? dh;
-        const cox  = (dw - cw) / 2 + (col.offsetX ?? 0);
-        const coy  = (dh - ch)     + (col.offsetY ?? 0);
-        // body offset is relative to top-left of sprite; origin is (0.5,1) so top-left = (x - dw/2, y - dh)
-        const bx   = s.x - dw / 2 + cox;
-        const by   = s.y - dh     + coy;
+    } else if (wo.type === 'object') {
+      // Show collision bounds from PropDef if blocksPlayer
+      const def = getPropDef(wo.data.type);
+      if (def.blocksPlayer && wo.sprite && def.collision) {
+        const s   = wo.sprite;
+        const dw  = s.displayWidth;
+        const dh  = s.displayHeight;
+        const col = def.collision;
+        const cw  = col.width   ?? dw;
+        const ch  = col.height  ?? dh;
+        const cox = (dw - cw) / 2 + (col.offsetX ?? 0);
+        const coy = (dh - ch)     + (col.offsetY ?? 0);
+        const bx  = s.x - dw / 2 + cox;
+        const by  = s.y - dh     + coy;
         this._selRect.lineStyle(2, 0x00ccff, 0.9);
         this._selRect.strokeRect(bx, by, cw, ch);
       }
@@ -727,11 +767,6 @@ export default class LevelEditorScene extends Phaser.Scene {
       const rh = wo._zoneH;
       if (Math.abs(wx - (rx + rw)) <= 10 && Math.abs(wy - (ry + rh / 2)) <= 10) return 'width';
       if (Math.abs(wx - (rx + rw / 2)) <= 10 && Math.abs(wy - (ry + rh)) <= 10) return 'height';
-    } else if (wo.type === 'prop' && wo.sprite) {
-      const s  = wo.sprite;
-      const hw = s.displayWidth * 0.5;
-      // Scale handle: bottom-right corner (sprite origin is (0.5,1) so s.y = bottom)
-      if (Math.abs(wx - (s.x + hw)) <= 10 && Math.abs(wy - s.y) <= 10) return 'scale';
     }
     return null;
   }
@@ -741,7 +776,8 @@ export default class LevelEditorScene extends Phaser.Scene {
   // ══════════════════════════════════════════════════════════════════════
 
   _onPointerDown(pointer) {
-    if (this._capturingInput) return;
+    if (this._editorScrub) return;
+    if (this._capturingInput || this._activeTextInput) return;
 
     // Zones UI : palette gauche, toolbar haut, props bas, liste droite
     const inUI = pointer.x < PAL_W
@@ -780,7 +816,18 @@ export default class LevelEditorScene extends Phaser.Scene {
   }
 
   _onPointerMove(pointer) {
-    if (!pointer.isDown || this._capturingInput) return;
+    // Scrub numérique — priorité absolue, fonctionne partout sur l'écran
+    if (this._editorScrub && pointer.isDown) {
+      const sc = this._editorScrub;
+      const dy = sc.startY - pointer.y;  // déplacement vers le haut = positif
+      const newVal = sc.startVal + dy * sc.step;
+      sc.currentVal = newVal;
+      const disp = sc.decimals > 0 ? Number(newVal).toFixed(sc.decimals) : String(Math.round(newVal));
+      sc.textObj.setText(disp);
+      return;
+    }
+
+    if (!pointer.isDown || this._capturingInput || this._activeTextInput) return;
     if (!this._selected) return;
     if (pointer.x < PAL_W || pointer.x > GAME_W - LIST_W
      || pointer.y < TOOL_H || pointer.y > GAME_H - PROP_H) return;
@@ -810,20 +857,7 @@ export default class LevelEditorScene extends Phaser.Scene {
         this._drawSelectionRect(wo);
         this._updatePropsPanel();
       } else if (this._resizeMode === 'scale') {
-        // Scale = distance horizontale depuis le centre du sprite / demi-largeur originale
-        const baseHalfW = wo.sprite.width / 2;
-        const newScale  = Phaser.Math.Clamp((wx - wo.sprite.x) / baseHalfW, 0.1, 4.0);
-        // Appliquer à tous les props du même type dans le niveau courant
-        const propType = wo.data.type;
-        const level    = this._levels[this._currentIdx];
-        for (const p of level.props) {
-          if (p.type === propType) p.scale = newScale;
-        }
-        for (const w of this._worldObjects) {
-          if (w.type === 'prop' && w.data.type === propType && w.sprite) {
-            w.sprite.setScale(newScale);
-          }
-        }
+        // Scale drag disabled — scale is managed via PropDefs now
         this._drawSelectionRect(wo);
         this._updatePropsPanel();
       }
@@ -840,7 +874,7 @@ export default class LevelEditorScene extends Phaser.Scene {
 
   _moveObject(wo, wx, wy) {
     wo.data.x = wx;
-    if (wo.type === 'prop' || wo.type === 'container') {
+    if (wo.type === 'object') {
       wo.data.y = wy;
       wo.sprite.setPosition(wx, wy).setDepth(wy + 10);
     } else if (wo.type === 'transit') {
@@ -866,7 +900,7 @@ export default class LevelEditorScene extends Phaser.Scene {
   }
 
   _onWheel(pointer, deltaY) {
-    if (this._capturingInput) return;
+    if (this._capturingInput || this._activeTextInput) return;
     const inUI = pointer.x < PAL_W || pointer.x > GAME_W - LIST_W
               || pointer.y < TOOL_H || pointer.y > GAME_H - PROP_H;
     const focusX = inUI ? GAME_W / 2 : pointer.x;
@@ -905,23 +939,12 @@ export default class LevelEditorScene extends Phaser.Scene {
   _placeItem(wx, wy) {
     const level = this._levels[this._currentIdx];
 
-    if (this._activeTool.startsWith('prop:')) {
-      const propType = this._activeTool.slice(5);
-      const toolDef  = TOOLS.find(t => t.id === this._activeTool);
-      const entry = { type: propType, x: wx, y: wy, scale: toolDef?.scale ?? 1.0 };
-      level.props.push(entry);
-      const wo = this._spawnPropSprite(entry);
-      if (wo) { this._selectObject(wo); this._dragOrigin = null; }
-      return;
-    }
-
-    if (this._activeTool.startsWith('container:')) {
-      const tex = this._activeTool.slice('container:'.length);
-      const entry = { x: wx, y: wy, texture: tex };
-      if (tex === 'coffrePlanque') entry.isHideoutChest   = true;
-      if (tex === 'workbench')     entry.isUpgradeStation = true;
-      level.containers.push(entry);
-      const wo = this._spawnContainerSprite(entry);
+    if (this._activeTool.startsWith('obj:')) {
+      const objType = this._activeTool.slice(4);
+      const entry = { type: objType, x: wx, y: wy };
+      if (!level.objects) level.objects = [];
+      level.objects.push(entry);
+      const wo = this._spawnObjectSprite(entry);
       if (wo) { this._selectObject(wo); this._dragOrigin = null; }
       return;
     }
@@ -971,10 +994,13 @@ export default class LevelEditorScene extends Phaser.Scene {
 
       const isSelected = wo === sel;
       const label = this._woShortLabel(wo);
-      const color = isSelected ? '#ffff00'
-        : wo.type === 'container' ? '#88ff88'
-        : wo.type === 'transit'   ? '#00ccff'
-        : '#aaaaaa';
+      let baseColor = '#aaaaaa';
+      if (wo.type === 'transit') baseColor = '#00ccff';
+      else if (wo.type === 'object') {
+        const def = getPropDef(wo.data.type);
+        baseColor = def.isContainer ? '#88ff88' : def.blocksPlayer ? '#ff8844' : '#aaaaaa';
+      }
+      const color = isSelected ? '#ffff00' : baseColor;
 
       const txt = this.add.text(lx, y, label, {
         fontFamily: 'monospace', fontSize: '9px', color,
@@ -1021,12 +1047,12 @@ export default class LevelEditorScene extends Phaser.Scene {
         : '(none)';
       return `[W] ${wo.data.label ?? 'warp'} → ${dest}`;
     }
-    if (wo.type === 'container') {
-      const flag = wo.data.isHideoutChest ? ' ★coffre' : wo.data.isUpgradeStation ? ' ★upgrade' : '';
-      return `[C] ${wo.data.texture ?? 'barrel'}${flag} x${x}`;
+    if (wo.type === 'object') {
+      const def = getPropDef(wo.data.type);
+      const tag = def.isContainer ? 'C' : def.blocksPlayer ? 'B' : 'P';
+      const special = def.specialType === 'chest' ? ' ★coffre' : def.specialType === 'upgradeStation' ? ' ★upgrade' : '';
+      return `[${tag}] ${wo.data.type}${special} x${x}`;
     }
-    const blockMark = (wo.data.blocksPlayer ? '■' : '') + (wo.data.blocksEnemy ? 'E' : '');
-    return `[P] ${wo.data.type} x${x} ${blockMark}`.trimEnd();
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -1041,11 +1067,10 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._propInfoText.setVisible(false);
     this._btnDel.setVisible(!!wo);
 
-    for (const f of [this._fieldX, this._fieldY, this._fieldScale,
+    for (const f of [this._fieldX, this._fieldY,
                      this._fieldBg, this._fieldMid, this._fieldWW,
                      this._fieldLaneTop, this._fieldLaneBot, this._fieldSpawnX,
-                     this._fieldWidth, this._fieldHeight, this._fieldLabel,
-                     this._fieldColW, this._fieldColH, this._fieldColOX, this._fieldColOY]) {
+                     this._fieldWidth, this._fieldHeight, this._fieldLabel]) {
       f.lbl.setVisible(false); f.val.setVisible(false);
     }
     this._lblTarget.setVisible(false);
@@ -1057,10 +1082,6 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._btnBgL.setVisible(false);
     this._lblBgName.setVisible(false);
     this._btnBgR.setVisible(false);
-    this._btnBlock.setVisible(false);
-    this._btnBlockEnemy.setVisible(false);
-    this._btnHideoutChest.setVisible(false);
-    this._btnUpgradeStation.setVisible(false);
 
     if (!wo) {
       // Aucun objet sélectionné → afficher les propriétés du niveau courant
@@ -1111,44 +1132,15 @@ export default class LevelEditorScene extends Phaser.Scene {
       this._lblTargetWarp.setText(`↪ ${twarpLabel}`).setPosition(x0 + 580, py).setVisible(!!wo.data.targetLevel);
       this._btnWarpL.setPosition(x0 + 690, py).setVisible(!!wo.data.targetLevel);
       this._btnWarpR.setPosition(x0 + 710, py).setVisible(!!wo.data.targetLevel);
-    } else if (wo.type === 'container') {
-      // Toggles isHideoutChest / isUpgradeStation (le type est déterminé par la texture)
-      const isChest   = !!wo.data.isHideoutChest;
-      const isUpgrade = !!wo.data.isUpgradeStation;
-      this._btnHideoutChest
-        .setText(isChest   ? '[■ coffre]'  : '[□ coffre]')
-        .setColor(isChest   ? '#ffdd66' : '#555555')
-        .setPosition(x0 + 180, py).setVisible(true);
-      this._btnUpgradeStation
-        .setText(isUpgrade ? '[■ upgrade]' : '[□ upgrade]')
-        .setColor(isUpgrade ? '#ff9944' : '#555555')
-        .setPosition(x0 + 270, py).setVisible(true);
-    } else {
-      this._showField(this._fieldScale, x0 + 180, py, 'scale', Number((wo.data.scale ?? 1.0).toFixed(2)));
-      // Toggles collision uniquement pour les props
-      if (wo.type === 'prop') {
-        const blocking = !!wo.data.blocksPlayer;
-        this._btnBlock
-          .setText(blocking ? '[■ BLOCK]' : '[□ block]')
-          .setColor(blocking ? '#ff6600' : '#555555')
-          .setPosition(x0 + 270, py).setVisible(true);
-        const blockingE = !!wo.data.blocksEnemy;
-        this._btnBlockEnemy
-          .setText(blockingE ? '[■ ENEMY]' : '[□ enemy]')
-          .setColor(blockingE ? '#ff6600' : '#555555')
-          .setPosition(x0 + 340, py).setVisible(true);
-
-        // ── Collision box fields (visible only for blocksPlayer props) ─
-        if (blocking && wo.sprite) {
-          const col = wo.data.collision ?? {};
-          const dw  = wo.sprite.displayWidth;
-          const dh  = wo.sprite.displayHeight;
-          this._showCollisionField(this._fieldColW,  x0 + 420, py, 'col.w',  col.width   ?? Math.round(dw));
-          this._showCollisionField(this._fieldColH,  x0 + 490, py, 'col.h',  col.height  ?? Math.round(dh));
-          this._showCollisionField(this._fieldColOX, x0 + 560, py, 'col.ox', col.offsetX ?? 0);
-          this._showCollisionField(this._fieldColOY, x0 + 630, py, 'col.oy', col.offsetY ?? 0);
-        }
-      }
+    } else if (wo.type === 'object') {
+      // Object properties: just type + position (scale/collision/container managed via PropDefs)
+      const def = getPropDef(wo.data.type);
+      const info = [];
+      if (def.isContainer)  info.push('container');
+      if (def.blocksPlayer) info.push('bloque');
+      if (def.specialType)  info.push(def.specialType);
+      this._propInfoText.setText(`${wo.data.type}  (${info.join(', ') || 'décoratif'})  scale=${def.scale}`)
+        .setVisible(true);
     }
   }
 
@@ -1157,137 +1149,17 @@ export default class LevelEditorScene extends Phaser.Scene {
     field.val.setPosition(x, y + 6).setText(String(value)).setVisible(true).setColor('#cccccc');
   }
 
-  _showCollisionField(field, x, y, label, value) {
-    field.lbl.setPosition(x, y - 7).setText(label + ':').setVisible(true);
-    field.val.setPosition(x, y + 6).setText(String(value)).setVisible(true).setColor('#44bbcc');
-  }
-
-  _startCollisionInput(wo, colProp, textObj) {
-    if (this._capturingInput) return;
-    const col = wo.data.collision ?? {};
-    let cur;
-    if (colProp === 'width')   cur = col.width  ?? Math.round(wo.sprite?.displayWidth  ?? 0);
-    if (colProp === 'height')  cur = col.height ?? Math.round(wo.sprite?.displayHeight ?? 0);
-    if (colProp === 'offsetX') cur = col.offsetX ?? 0;
-    if (colProp === 'offsetY') cur = col.offsetY ?? 0;
-    this._capturingInput = true;
-    this._inputBuffer    = String(cur ?? 0);
-    this._inputTarget    = { obj: wo, field: '__collision', colProp, textObj };
-    textObj.setColor('#ffff00').setText(this._inputBuffer + '_');
-  }
 
   // ══════════════════════════════════════════════════════════════════════
-  //  SAISIE NUMÉRIQUE INLINE
+  //  SAISIE NUMÉRIQUE (poids loot — keyboard capture)
+  //  Note : saisie TEXTE (label, nom niveau, texture) → TextInput DOM natif
   // ══════════════════════════════════════════════════════════════════════
-
-  _startNumInput(wo, field, textObj) {
-    if (this._capturingInput) return;
-    this._capturingInput = true;
-    this._inputBuffer    = String(wo.data[field] ?? '');
-    this._inputTarget    = { obj: wo, field, textObj };
-    textObj.setColor('#ffff00').setText(this._inputBuffer + '_');
-  }
-
-  _startLevelPropInput(path, textObj) {
-    if (this._capturingInput) return;
-    const level = this._levels[this._currentIdx];
-    let cur;
-    if (path === 'parallax.bg')  cur = level.parallax?.bg  ?? 0.06;
-    if (path === 'parallax.mid') cur = level.parallax?.mid ?? 0.25;
-    if (path === 'worldW')       cur = level.worldW ?? 3840;
-    if (path === 'laneTop')      cur = level.laneTop    ?? LANE_TOP;
-    if (path === 'laneBottom')   cur = level.laneBottom ?? LANE_BOTTOM;
-    if (path === 'spawnX')       cur = level.spawnX     ?? 150;
-    this._capturingInput = true;
-    this._inputBuffer    = String(cur);
-    this._inputTarget    = { obj: null, field: '__levelProp', levelPath: path, textObj };
-    textObj.setColor('#ffff00').setText(this._inputBuffer + '_');
-  }
-
-  _startRename() {
-    const level = this._levels[this._currentIdx];
-    this._capturingInput = true;
-    this._inputBuffer    = level.name ?? '';
-    this._inputTarget    = { obj: null, field: 'name', textObj: this._levelNameText };
-    this._levelNameText.setColor('#ffff00').setText(this._inputBuffer + '_');
-  }
 
   _commitInput() {
     if (!this._capturingInput) return;
-    // Déléguer au sous-système loot si nécessaire
     if (this._inputTarget?.source === 'loot') { this._commitLootInput(); return; }
-    const { obj, field, textObj } = this._inputTarget;
-    const level = this._levels[this._currentIdx];
-
-    if (field === 'name') {
-      if (this._inputBuffer.trim()) level.name = this._inputBuffer.trim();
-      this._updateToolbarName();
-      textObj.setColor('#ffffff');
-    } else if (field === '__levelProp') {
-      const val  = parseFloat(this._inputBuffer);
-      const path = this._inputTarget.levelPath;
-      if (!isNaN(val)) {
-        if (path === 'parallax.bg')       { if (!level.parallax) level.parallax = {}; level.parallax.bg  = val; }
-        else if (path === 'parallax.mid') { if (!level.parallax) level.parallax = {}; level.parallax.mid = val; }
-        else if (path === 'worldW')       { level.worldW = Math.round(Math.max(200, val)); this._rebuildBackground(); }
-        else if (path === 'laneTop')      { level.laneTop    = Math.round(val); this._loadLevel(); }
-        else if (path === 'laneBottom')   { level.laneBottom = Math.round(val); this._loadLevel(); }
-        else if (path === 'spawnX')       { level.spawnX = Math.round(Math.max(0, val)); this._rebuildBackground(); }
-      }
-      textObj.setColor('#aaaacc');
-    } else if (field === '__collision' && obj) {
-      const val = parseFloat(this._inputBuffer);
-      if (!isNaN(val)) {
-        if (!obj.data.collision) obj.data.collision = {};
-        const colProp = this._inputTarget.colProp;
-        if (colProp === 'width' || colProp === 'height') {
-          obj.data.collision[colProp] = Math.max(1, Math.round(val));
-        } else {
-          obj.data.collision[colProp] = Math.round(val);
-        }
-        // If all collision values are default, clean up
-        const col = obj.data.collision;
-        const dw  = Math.round(obj.sprite?.displayWidth  ?? 0);
-        const dh  = Math.round(obj.sprite?.displayHeight ?? 0);
-        if ((col.width ?? dw) === dw && (col.height ?? dh) === dh
-            && (col.offsetX ?? 0) === 0 && (col.offsetY ?? 0) === 0) {
-          delete obj.data.collision;
-        }
-        this._drawSelectionRect(obj);
-        if (this._showHitboxes) this._rebuildHitboxOverlay();
-      }
-      textObj.setColor('#44bbcc');
-    } else if (obj) {
-      if (field === 'label') {
-        const trimmed = this._inputBuffer.trim();
-        if (trimmed) obj.data.label = trimmed;
-        if (obj.type === 'transit') this._refreshTransitWO(obj);
-      } else {
-        const val = parseFloat(this._inputBuffer);
-        if (!isNaN(val)) {
-          if (field === 'scale') {
-            obj.data.scale = val;
-            if (obj.sprite) obj.sprite.setScale(val);
-          } else if (field === 'width') {
-            obj.data.width = Math.max(20, Math.round(val));
-            if (obj.type === 'transit') { this._refreshTransitWO(obj); this._drawSelectionRect(obj); }
-          } else if (field === 'height') {
-            obj.data.height = Math.max(20, Math.round(val));
-            obj._zoneH = obj.data.height;
-            if (obj.type === 'transit') { this._refreshTransitWO(obj); this._drawSelectionRect(obj); }
-          } else {
-            obj.data[field] = Math.round(val);
-            if (field === 'x' || field === 'y') this._moveObject(obj, obj.data.x, obj.data.y);
-          }
-        }
-      }
-      textObj.setColor('#cccccc');
-    }
-
     this._capturingInput = false;
     this._inputTarget    = null;
-    this._updatePropsPanel();
-    this._updateListPanel();
   }
 
   _cancelInput() {
@@ -1299,13 +1171,56 @@ export default class LevelEditorScene extends Phaser.Scene {
       this._lootRedrawContent();
       return;
     }
-    const { field, textObj } = this._inputTarget;
-    if (field === '__levelProp')    textObj.setColor('#aaaacc');
-    else if (field === '__collision') textObj.setColor('#44bbcc');
-    else if (field === 'name')      { textObj.setColor('#ffffff'); this._updateToolbarName(); }
-    else                            textObj.setColor('#cccccc');
     this._capturingInput = false;
     this._inputTarget    = null;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  SCRUB NUMÉRIQUE (drag vertical sur un champ)
+  // ══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Démarre un scrub sur un champ numérique.
+   * @param {Phaser.Input.Pointer} pointer
+   * @param {number}  startVal    Valeur actuelle du champ
+   * @param {number}  step        Unités par pixel draggé
+   * @param {number}  decimals    Décimales à afficher (0 = entier)
+   * @param {Phaser.GameObjects.Text} textObj
+   * @param {string}  resetColor  Couleur de restauration après drag
+   * @param {function} onApply   (finalVal) → void, appelé sur pointerup
+   */
+  _startEditorScrub(pointer, startVal, step, decimals, textObj, resetColor, onApply) {
+    if (this._editorScrub) return;
+    this._editorScrub = { startY: pointer.y, startVal, step, decimals, textObj, resetColor, onApply, currentVal: startVal };
+    textObj.setColor('#ffff00');
+  }
+
+  /** Applique une propriété de niveau et déclenche le rebuild si besoin. */
+  _applyLevelProp(path, val) {
+    if (isNaN(val)) return;
+    const level = this._levels[this._currentIdx];
+    if (path === 'parallax.bg')       { if (!level.parallax) level.parallax = {}; level.parallax.bg  = val; }
+    else if (path === 'parallax.mid') { if (!level.parallax) level.parallax = {}; level.parallax.mid = val; }
+    else if (path === 'worldW')       { level.worldW = Math.round(Math.max(200, val)); this._rebuildBackground(); }
+    else if (path === 'laneTop')      { level.laneTop    = Math.round(val); this._loadLevel(); }
+    else if (path === 'laneBottom')   { level.laneBottom = Math.round(val); this._loadLevel(); }
+    else if (path === 'spawnX')       { level.spawnX = Math.round(Math.max(0, val)); this._rebuildBackground(); }
+    this._updatePropsPanel();
+  }
+
+  /** Applique une modification sur un champ numérique d'un objet monde. */
+  _applyObjectField(wo, field, val) {
+    if (field === 'width') {
+      wo.data.width = Math.max(20, Math.round(val));
+      if (wo.type === 'transit') { this._refreshTransitWO(wo); this._drawSelectionRect(wo); }
+    } else if (field === 'height') {
+      wo.data.height = Math.max(20, Math.round(val));
+      wo._zoneH = wo.data.height;
+      if (wo.type === 'transit') { this._refreshTransitWO(wo); this._drawSelectionRect(wo); }
+    } else {
+      wo.data[field] = Math.round(val);
+      if (field === 'x' || field === 'y') this._moveObject(wo, wo.data.x, wo.data.y);
+    }
     this._updatePropsPanel();
   }
 
@@ -1314,6 +1229,7 @@ export default class LevelEditorScene extends Phaser.Scene {
   // ══════════════════════════════════════════════════════════════════════
 
   _onKeyDown(e) {
+    // Saisie numérique clavier (poids loot) — les champs texte utilisent TextInput DOM
     if (this._capturingInput) {
       if (e.key === 'Enter')     { this._commitInput(); return; }
       if (e.key === 'Escape')    { this._cancelInput(); return; }
@@ -1322,11 +1238,8 @@ export default class LevelEditorScene extends Phaser.Scene {
         this._inputTarget.textObj.setText(this._inputBuffer + '_');
         return;
       }
-      const isText = this._inputTarget.field === 'label' || this._inputTarget.field === 'name';
-      const valid  = isText
-        ? (/^[\w \-]$/.test(e.key) && this._inputBuffer.length < 30)
-        : (/^[\d.\-]$/.test(e.key) && this._inputBuffer.length < 10);
-      if (valid) {
+      // Saisie numérique uniquement (source === 'loot')
+      if (/^[\d.\-]$/.test(e.key) && this._inputBuffer.length < 10) {
         this._inputBuffer += e.key;
         this._inputTarget.textObj.setText(this._inputBuffer + '_');
       }
@@ -1334,6 +1247,7 @@ export default class LevelEditorScene extends Phaser.Scene {
     }
 
     if (e.key === 'Escape') {
+      if (this._propsEdOverlay) { this._closePropsEditor(); return; }
       if (this._lootOverlay) { this._hideLootEditor(); return; }
       if (this._selected) this._deselect();
       else this.scene.start('TitleScene');
@@ -1368,12 +1282,14 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._hitboxGraphics = [];
   }
 
-  /** Draw cyan collision rectangles for all blocksPlayer props. */
+  /** Draw cyan collision rectangles for all blocksPlayer objects (from PropDefs). */
   _rebuildHitboxOverlay() {
     this._clearHitboxOverlay();
     for (const wo of this._worldObjects) {
-      if (wo.type !== 'prop' || !wo.data.blocksPlayer || !wo.sprite) continue;
-      const col = wo.data.collision ?? {};
+      if (wo.type !== 'object' || !wo.sprite) continue;
+      const def = getPropDef(wo.data.type);
+      if (!def.blocksPlayer || !def.collision) continue;
+      const col = def.collision;
       const s   = wo.sprite;
       const dw  = s.displayWidth;
       const dh  = s.displayHeight;
@@ -1388,7 +1304,6 @@ export default class LevelEditorScene extends Phaser.Scene {
       this._worldLayer.add(g);
       g.lineStyle(1, 0x00ccff, 0.7);
       g.strokeRect(bx, by, cw, ch);
-      // Small label
       const lbl = this.add.text(bx + 2, by + 2, `${Math.round(cw)}×${Math.round(ch)}`, {
         fontFamily: 'monospace', fontSize: '8px', color: '#00ccff',
       }).setDepth(8999).setAlpha(0.8);
@@ -1402,8 +1317,7 @@ export default class LevelEditorScene extends Phaser.Scene {
     const wo    = this._selected.obj;
     const level = this._levels[this._currentIdx];
 
-    if (wo.type === 'prop')      level.props        = level.props.filter(p => p !== wo.data);
-    if (wo.type === 'container') level.containers   = level.containers.filter(c => c !== wo.data);
+    if (wo.type === 'object')    level.objects       = (level.objects ?? []).filter(o => o !== wo.data);
     if (wo.type === 'transit')   level.transitZones = level.transitZones.filter(z => z !== wo.data);
 
     this._destroyWO(wo);
@@ -1454,38 +1368,7 @@ export default class LevelEditorScene extends Phaser.Scene {
     this._updateListPanel();
   }
 
-  _toggleBlocksPlayer() {
-    const wo = this._selected?.obj;
-    if (!wo || wo.type !== 'prop') return;
-    wo.data.blocksPlayer = !wo.data.blocksPlayer;
-    this._updatePropsPanel();
-    this._updateListPanel();
-  }
-
-  _toggleBlocksEnemy() {
-    const wo = this._selected?.obj;
-    if (!wo || wo.type !== 'prop') return;
-    wo.data.blocksEnemy = !wo.data.blocksEnemy;
-    this._updatePropsPanel();
-    this._updateListPanel();
-  }
-
-  _toggleContainerFlag(flag) {
-    const wo = this._selected?.obj;
-    if (!wo || wo.type !== 'container') return;
-    wo.data[flag] = !wo.data[flag];
-    // Flags mutuellement exclusifs
-    if (flag === 'isHideoutChest'   && wo.data.isHideoutChest)   { wo.data.isUpgradeStation = false; }
-    if (flag === 'isUpgradeStation' && wo.data.isUpgradeStation) { wo.data.isHideoutChest   = false; }
-    // Mettre à jour le tint du sprite (basé sur texture + flags spéciaux)
-    const tint = wo.data.isHideoutChest      ? 0xffdd66
-               : wo.data.isUpgradeStation    ? 0xff9944
-               : wo.data.texture === 'toolbox' ? 0x44ddff
-               : 0x88ff88;
-    if (wo.sprite) wo.sprite.setTint(tint);
-    this._updatePropsPanel();
-    this._updateListPanel();
-  }
+  // Toggle functions removed — all prop properties managed via PropDefs now
 
   _refreshTransitWO(wo) {
     const zoneW = wo.data.width ?? 120;
@@ -1512,8 +1395,9 @@ export default class LevelEditorScene extends Phaser.Scene {
     const base   = JSON.parse(JSON.stringify(this._levels[this._currentIdx]));
     base.id   = `level_${String(newIdx).padStart(2, '0')}`;
     base.name = `Level ${newIdx}`;
-    base.props = [];
-    base.containers = [];
+    base.objects = [];
+    delete base.props;
+    delete base.containers;
     base.transitZones = [{
       id: 'zone_warp_01', type: 'warp',
       x: Math.max(200, (base.worldW ?? 3840) - 200),
@@ -1578,17 +1462,9 @@ export default class LevelEditorScene extends Phaser.Scene {
       if (lv.laneTop    != null) ln.push(`    laneTop: ${lv.laneTop},`);
       if (lv.laneBottom != null) ln.push(`    laneBottom: ${lv.laneBottom},`);
       if (lv.spawnX     != null) ln.push(`    spawnX: ${lv.spawnX},`);
-      ln.push('    props: [');
-      for (const p of (lv.props ?? [])) {
-        const blockStr = (p.blocksPlayer ? ', blocksPlayer: true' : '') + (p.blocksEnemy ? ', blocksEnemy: true' : '');
-        ln.push(`      { type: '${p.type}', x: ${p.x}, y: ${p.y}, scale: ${p.scale ?? 1}${blockStr} },`);
-      }
-      ln.push('    ],');
-      ln.push('    containers: [');
-      for (const c of (lv.containers ?? [])) {
-        const flagStr = (c.isHideoutChest   ? ', isHideoutChest: true'   : '')
-                      + (c.isUpgradeStation ? ', isUpgradeStation: true' : '');
-        ln.push(`      { x: ${c.x}, y: ${c.y}, texture: '${c.texture ?? 'barrel'}'${flagStr} },`);
+      ln.push('    objects: [');
+      for (const obj of (lv.objects ?? [])) {
+        ln.push(`      { type: '${obj.type}', x: ${obj.x}, y: ${obj.y} },`);
       }
       ln.push('    ],');
       ln.push('    transitZones: [');
@@ -2110,5 +1986,411 @@ export default class LevelEditorScene extends Phaser.Scene {
       console.error('[Editor] Loot save error:', e.message);
       this._showSaveFeedback(false);
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  PROPS EDITOR OVERLAY
+  // ══════════════════════════════════════════════════════════════════════
+
+  _showPropsEditor() {
+    if (this._propsEdOverlay) return;
+    // Deep copy of PROP_DEFS for editing
+    this._propsEdDefs = JSON.parse(JSON.stringify(PROP_DEFS));
+    this._propsEdSelected = Object.keys(this._propsEdDefs)[0] ?? null;
+
+    const D = 9990;
+    const objs = [];
+    const co = (o) => { objs.push(o); this._uiLayer.add(o); return o; };
+
+    // Background
+    co(this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.96)
+      .setDepth(D).setInteractive());
+
+    // Title
+    co(this.add.text(GAME_W / 2, 10, '◆ PROPS EDITOR', {
+      fontFamily: 'monospace', fontSize: '14px', color: '#44ccff',
+      stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5, 0).setDepth(D + 1));
+
+    // Close button
+    const btnClose = co(this.add.text(GAME_W - 12, 8, '[ CLOSE ]', {
+      fontFamily: 'monospace', fontSize: '12px', color: '#ff6600',
+    }).setOrigin(1, 0).setDepth(D + 2).setInteractive({ useHandCursor: true }));
+    btnClose.on('pointerdown', () => this._closePropsEditor());
+    btnClose.on('pointerover', () => btnClose.setColor('#ffffff'));
+    btnClose.on('pointerout',  () => btnClose.setColor('#ff6600'));
+
+    // Save button
+    const btnSave = co(this.add.text(GAME_W - 100, 8, '[ SAVE ]', {
+      fontFamily: 'monospace', fontSize: '12px', color: '#00ff88',
+    }).setOrigin(1, 0).setDepth(D + 2).setInteractive({ useHandCursor: true }));
+    btnSave.on('pointerdown', () => this._savePropsEditor());
+    btnSave.on('pointerover', () => btnSave.setColor('#ffffff'));
+    btnSave.on('pointerout',  () => btnSave.setColor('#00ff88'));
+
+    this._propsEdOverlay = objs;
+    this._propsEdContent = [];  // rebuilt each redraw
+
+    // Global pointer handlers for drag-scrub
+    this._propsEdMoveHandler = (pointer) => {
+      const drag = this._propsEdDrag;
+      if (!drag) return;
+      const dy    = drag.startY - pointer.y;  // up = positive
+      const delta = dy * drag.step;
+      const newVal = drag.startVal + delta;
+      drag.onChange(newVal);
+      const disp = drag.decimals > 0 ? Number(newVal).toFixed(drag.decimals) : String(Math.round(newVal));
+      drag.textObj.setText(disp);
+      // Live update preview (no full redraw for perf)
+      this._propsEdUpdatePreview();
+    };
+    this._propsEdUpHandler = () => {
+      if (!this._propsEdDrag) return;
+      this._propsEdDrag.textObj.setColor('#cccccc');
+      this._propsEdDrag = null;
+      this._propsEdRedraw();  // full redraw to sync everything
+    };
+    this.input.on('pointermove', this._propsEdMoveHandler);
+    this.input.on('pointerup',  this._propsEdUpHandler);
+
+    this._propsEdRedraw();
+  }
+
+  _closePropsEditor() {
+    if (!this._propsEdOverlay) return;
+    // Remove global handlers
+    if (this._propsEdMoveHandler) this.input.off('pointermove', this._propsEdMoveHandler);
+    if (this._propsEdUpHandler)   this.input.off('pointerup',  this._propsEdUpHandler);
+    this._propsEdMoveHandler = null;
+    this._propsEdUpHandler   = null;
+    this._propsEdDrag = null;
+    // Fermer tout TextInput DOM ouvert depuis le Props Editor
+    if (this._activeTextInput) { this._activeTextInput.destroy(); this._activeTextInput = null; }
+    this._propsEdAddingTexture = false;
+    for (const o of this._propsEdOverlay) o.destroy();
+    for (const o of this._propsEdContent) o.destroy();
+    this._propsEdOverlay = null;
+    this._propsEdContent = [];
+    this._propsEdDefs    = null;
+    this._propsEdSelected = null;
+  }
+
+  _propsEdRedraw() {
+    for (const o of this._propsEdContent) o.destroy();
+    this._propsEdContent = [];
+
+    const D = 9991;
+    const co = (o) => { this._propsEdContent.push(o); this._uiLayer.add(o); return o; };
+    const defs = this._propsEdDefs;
+    const keys = Object.keys(defs);
+    const sel  = this._propsEdSelected;
+
+    // ── Left column: texture list ──────────────────────────────────
+    const listX = 20;
+    let   listY = 38;
+
+    co(this.add.text(listX, listY, 'TEXTURES', {
+      fontFamily: 'monospace', fontSize: '10px', color: '#666688',
+    }).setDepth(D));
+    listY += 16;
+
+    for (const key of keys) {
+      const def = defs[key];
+      const isSel = key === sel;
+      const color = isSel ? '#ffffff'
+        : def.isContainer ? '#88ff88'
+        : def.blocksPlayer ? '#ff8844'
+        : '#aaaaaa';
+
+      const btn = co(this.add.text(listX, listY, `${isSel ? '► ' : '  '}${key}`, {
+        fontFamily: 'monospace', fontSize: '11px', color,
+      }).setDepth(D).setInteractive({ useHandCursor: true }));
+      btn.on('pointerdown', () => {
+        this._propsEdSelected = key;
+        this._propsEdRedraw();
+      });
+      btn.on('pointerover', () => btn.setColor('#ffffff'));
+      btn.on('pointerout',  () => btn.setColor(isSel ? '#ffffff' : color));
+      listY += 16;
+    }
+
+    // ── Bouton d'ajout de texture ─────────────────────────────────
+    listY += 6;
+    const addBtn = co(this.add.text(listX, listY, '[+ ajouter]', {
+      fontFamily: 'monospace', fontSize: '10px', color: '#44ff88',
+    }).setDepth(D).setInteractive({ useHandCursor: true }));
+    addBtn.on('pointerdown', () => {
+      if (this._activeTextInput) return;
+      this._activeTextInput = new TextInput(this, {
+        gameX: listX, gameY: listY + 12, width: 150, value: '',
+        onCommit: (key) => {
+          this._activeTextInput = null;
+          if (key && !this._propsEdDefs[key]) {
+            this._propsEdDefs[key] = { scale: 1, isContainer: false, blocksPlayer: false, collision: null, specialType: null };
+            this._propsEdSelected = key;
+          }
+          this._propsEdRedraw();
+        },
+        onCancel: () => { this._activeTextInput = null; },
+      });
+    });
+    addBtn.on('pointerover', () => addBtn.setColor('#ffffff'));
+    addBtn.on('pointerout',  () => addBtn.setColor('#44ff88'));
+
+    // ── Right column: properties of selected texture ────────────────
+    if (!sel || !defs[sel]) return;
+    const def = defs[sel];
+    const rx  = 200;
+    let   ry  = 38;
+
+    co(this.add.text(rx, ry, `PROPRIÉTÉS : ${sel}`, {
+      fontFamily: 'monospace', fontSize: '11px', color: '#44ccff',
+    }).setDepth(D));
+    ry += 22;
+
+    // Sprite preview
+    if (this.textures.exists(sel)) {
+      const preview = co(this.add.image(rx + 120, ry + 60, sel)
+        .setOrigin(0.5, 0.5).setScale(def.scale ?? 1).setDepth(D));
+      preview.__previewImg = true;
+      // Clamp preview size
+      const maxPreviewSize = 120;
+      const pw = preview.displayWidth;
+      const ph = preview.displayHeight;
+      if (pw > maxPreviewSize || ph > maxPreviewSize) {
+        const factor = maxPreviewSize / Math.max(pw, ph);
+        preview.setScale((def.scale ?? 1) * factor);
+      }
+
+      // Draw collision box on preview if blocksPlayer
+      if (def.blocksPlayer && def.collision) {
+        const ps   = preview.scaleX;
+        const rawW = this.textures.get(sel).source[0].width;
+        const rawH = this.textures.get(sel).source[0].height;
+        const dw   = rawW * ps;
+        const dh   = rawH * ps;
+        const col  = def.collision;
+        const cw   = (col.width ?? dw) * (ps / (def.scale ?? 1));
+        const ch   = (col.height ?? dh) * (ps / (def.scale ?? 1));
+        const g = co(this.add.graphics().setDepth(D + 1));
+        g.__colGfx = true;
+        const bx = preview.x - dw / 2 + (dw - cw) / 2 + (col.offsetX ?? 0) * (ps / (def.scale ?? 1));
+        const by = preview.y + dh / 2 - ch + (col.offsetY ?? 0) * (ps / (def.scale ?? 1));
+        g.lineStyle(2, 0x00ccff, 0.9);
+        g.strokeRect(bx, by, cw, ch);
+        g.fillStyle(0x00ccff, 0.15);
+        g.fillRect(bx, by, cw, ch);
+      }
+      ry += 130;
+    } else {
+      co(this.add.text(rx, ry, '(texture non chargée)', {
+        fontFamily: 'monospace', fontSize: '10px', color: '#ff4444',
+      }).setDepth(D));
+      ry += 20;
+    }
+
+    ry += 8;
+
+    // ── Toggle buttons ──────────────────────────────────────────────
+    const mkToggle = (x, y, label, active, onToggle) => {
+      const txt = co(this.add.text(x, y, `${active ? '[■]' : '[□]'} ${label}`, {
+        fontFamily: 'monospace', fontSize: '11px', color: active ? '#00ff88' : '#666666',
+      }).setDepth(D).setInteractive({ useHandCursor: true }));
+      txt.on('pointerdown', onToggle);
+      txt.on('pointerover', () => txt.setColor('#ffffff'));
+      txt.on('pointerout',  () => txt.setColor(active ? '#00ff88' : '#666666'));
+      return txt;
+    };
+
+    mkToggle(rx, ry, 'Bloque joueur', !!def.blocksPlayer, () => {
+      def.blocksPlayer = !def.blocksPlayer;
+      if (!def.blocksPlayer) def.collision = null;
+      else if (!def.collision) def.collision = { width: 50, height: 30, offsetX: 0, offsetY: 0 };
+      this._propsEdRedraw();
+    });
+    ry += 18;
+
+    mkToggle(rx, ry, 'Conteneur', !!def.isContainer, () => {
+      def.isContainer = !def.isContainer;
+      this._propsEdRedraw();
+    });
+    ry += 18;
+
+    // Special type cycle
+    const specials = [null, 'chest', 'upgradeStation'];
+    const specLabel = def.specialType ?? 'aucun';
+    const specBtn = co(this.add.text(rx, ry, `Spécial: < ${specLabel} >`, {
+      fontFamily: 'monospace', fontSize: '11px', color: def.specialType ? '#ffcc44' : '#666666',
+    }).setDepth(D).setInteractive({ useHandCursor: true }));
+    specBtn.on('pointerdown', () => {
+      const idx = specials.indexOf(def.specialType ?? null);
+      def.specialType = specials[(idx + 1) % specials.length];
+      this._propsEdRedraw();
+    });
+    specBtn.on('pointerover', () => specBtn.setColor('#ffffff'));
+    specBtn.on('pointerout',  () => specBtn.setColor(def.specialType ? '#ffcc44' : '#666666'));
+    ry += 24;
+
+    // ── Numeric fields (drag-scrub: click+drag up/down to change value) ──
+    // step = increment per pixel of mouse movement
+    const mkField = (x, y, label, value, onChange, step = 1, decimals = 0) => {
+      co(this.add.text(x, y, label + ':', {
+        fontFamily: 'monospace', fontSize: '9px', color: '#556688',
+      }).setDepth(D));
+      const dispVal = decimals > 0 ? Number(value).toFixed(decimals) : String(Math.round(value));
+      const valTxt = co(this.add.text(x + 60, y, dispVal, {
+        fontFamily: 'monospace', fontSize: '11px', color: '#cccccc',
+      }).setDepth(D).setInteractive({ useHandCursor: true, draggable: false }));
+
+      valTxt.on('pointerdown', (pointer) => {
+        this._propsEdDrag = {
+          startY:   pointer.y,
+          startVal: value,
+          onChange, step, decimals, textObj: valTxt,
+        };
+        valTxt.setColor('#ffff00');
+      });
+      valTxt.on('pointerover', () => { if (!this._propsEdDrag) valTxt.setColor('#ffffff'); });
+      valTxt.on('pointerout',  () => { if (!this._propsEdDrag || this._propsEdDrag.textObj !== valTxt) valTxt.setColor('#cccccc'); });
+    };
+
+    mkField(rx, ry, 'Scale', def.scale ?? 1, (val) => {
+      def.scale = Math.max(0.05, val);
+    }, 0.01, 3);
+    ry += 20;
+
+    // Collision fields (only if blocksPlayer)
+    if (def.blocksPlayer) {
+      ry += 4;
+      co(this.add.text(rx, ry, '── Collision ──', {
+        fontFamily: 'monospace', fontSize: '9px', color: '#00aacc',
+      }).setDepth(D));
+      ry += 16;
+
+      const col = def.collision ?? { width: 50, height: 30, offsetX: 0, offsetY: 0 };
+      const ensureCol = () => { if (!def.collision) def.collision = { width: 50, height: 30, offsetX: 0, offsetY: 0 }; };
+
+      mkField(rx, ry, 'width', col.width ?? 50, (v) => {
+        ensureCol(); def.collision.width = Math.max(1, Math.round(v));
+      }, 1);
+      ry += 18;
+      mkField(rx, ry, 'height', col.height ?? 30, (v) => {
+        ensureCol(); def.collision.height = Math.max(1, Math.round(v));
+      }, 1);
+      ry += 18;
+      mkField(rx, ry, 'offX', col.offsetX ?? 0, (v) => {
+        ensureCol(); def.collision.offsetX = Math.round(v);
+      }, 1);
+      ry += 18;
+      mkField(rx, ry, 'offY', col.offsetY ?? 0, (v) => {
+        ensureCol(); def.collision.offsetY = Math.round(v);
+      }, 1);
+      ry += 24;
+    }
+
+    // ── TEST HITBOX button ──────────────────────────────────────────
+    const testBtn = co(this.add.text(rx, ry, '[ TEST HITBOX ]', {
+      fontFamily: 'monospace', fontSize: '12px', color: '#ff88cc',
+    }).setDepth(D).setInteractive({ useHandCursor: true }));
+    testBtn.on('pointerdown', () => this._testHitbox(sel));
+    testBtn.on('pointerover', () => testBtn.setColor('#ffffff'));
+    testBtn.on('pointerout',  () => testBtn.setColor('#ff88cc'));
+  }
+
+  /** Live-update the sprite preview + collision box during drag (no full redraw) */
+  _propsEdUpdatePreview() {
+    // Find the preview image in content — tagged with __previewImg
+    const preview = this._propsEdContent.find(o => o.__previewImg);
+    if (!preview) return;
+    const sel = this._propsEdSelected;
+    const def = this._propsEdDefs?.[sel];
+    if (!def) return;
+    const scale = def.scale ?? 1;
+    const maxPreviewSize = 120;
+    let s = scale;
+    if (this.textures.exists(sel)) {
+      const rawW = this.textures.get(sel).source[0].width  * s;
+      const rawH = this.textures.get(sel).source[0].height * s;
+      if (rawW > maxPreviewSize || rawH > maxPreviewSize) {
+        s *= maxPreviewSize / Math.max(rawW, rawH);
+      }
+    }
+    preview.setScale(s);
+
+    // Update collision box graphics
+    const colGfx = this._propsEdContent.find(o => o.__colGfx);
+    if (colGfx && def.blocksPlayer && def.collision) {
+      const col = def.collision;
+      const ps  = preview.scaleX;
+      const ratio = ps / (def.scale ?? 1);
+      const rawW = this.textures.get(sel).source[0].width;
+      const rawH = this.textures.get(sel).source[0].height;
+      const dw = rawW * ps;
+      const dh = rawH * ps;
+      const cw = (col.width ?? dw) * ratio;
+      const ch = (col.height ?? dh) * ratio;
+      const bx = preview.x - dw / 2 + (dw - cw) / 2 + (col.offsetX ?? 0) * ratio;
+      const by = preview.y + dh / 2 - ch + (col.offsetY ?? 0) * ratio;
+      colGfx.clear();
+      colGfx.lineStyle(2, 0x00ccff, 0.9);
+      colGfx.strokeRect(bx, by, cw, ch);
+      colGfx.fillStyle(0x00ccff, 0.15);
+      colGfx.fillRect(bx, by, cw, ch);
+    }
+  }
+
+  /** Launch a minimal test level with the selected prop for hitbox testing */
+  _testHitbox(textureKey) {
+    if (!textureKey) return;
+    // Create a minimal test level
+    const testLevel = {
+      id: '__hitbox_test',
+      name: 'Hitbox Test',
+      worldW: 960,
+      laneTop: 0,
+      laneBottom: GAME_H,
+      objects: [{ type: textureKey, x: 480, y: 400 }],
+      transitZones: [],
+    };
+    // Store the edited defs so the game uses them
+    // We need to save them first so the game loads the right values
+    this._applyPropsEdDefs();
+    this.registry.set('editorLevels', [testLevel, ...this._levels]);
+    this.scene.start('GameScene', { levelId: '__hitbox_test', fromEditor: true });
+  }
+
+  /** Apply edited PropDefs to the live PROP_DEFS object (in-memory) */
+  _applyPropsEdDefs() {
+    if (!this._propsEdDefs) return;
+    // Update the live PROP_DEFS object
+    for (const key of Object.keys(PROP_DEFS)) {
+      if (!this._propsEdDefs[key]) delete PROP_DEFS[key];
+    }
+    for (const [key, def] of Object.entries(this._propsEdDefs)) {
+      PROP_DEFS[key] = def;
+    }
+  }
+
+  async _savePropsEditor() {
+    if (!this._propsEdDefs) return;
+    // Apply to live PROP_DEFS
+    this._applyPropsEdDefs();
+
+    // Persist to server
+    try {
+      const res = await fetch(`${EDITOR_URL}/propdefs`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(this._propsEdDefs),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      this._showSaveFeedback(true);
+    } catch (e) {
+      console.error('[Editor] PropDefs save error:', e.message);
+      this._showSaveFeedback(false);
+    }
+
+    // Reload level to reflect changes (new scales, etc.)
+    this._loadLevel();
   }
 }

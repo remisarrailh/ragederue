@@ -1,4 +1,5 @@
 import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
+import { addDirListeners } from '../config/controls.js';
 
 export default class TitleScene extends Phaser.Scene {
   constructor() {
@@ -105,8 +106,10 @@ export default class TitleScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-ENTER',  () => this._confirmSel());
     this.input.keyboard.on('keydown-ESC',    () => this._openSettings());
     this.input.keyboard.on('keydown-L',      () => this._openEditor());
-    this.input.keyboard.on('keydown-UP',     () => { this._mSel = Math.max(0, this._mSel - 1); this._updateSel(); });
-    this.input.keyboard.on('keydown-DOWN',   () => { this._mSel = Math.min(this._mBtns.length - 1, this._mSel + 1); this._updateSel(); });
+    addDirListeners(this, {
+      onUp:   () => { this._mSel = Math.max(0, this._mSel - 1); this._updateSel(); },
+      onDown: () => { this._mSel = Math.min(this._mBtns.length - 1, this._mSel + 1); this._updateSel(); },
+    });
 
     // ── Gamepad ───────────────────────────────────────────────────────────
     this._gpCooldown = 0;

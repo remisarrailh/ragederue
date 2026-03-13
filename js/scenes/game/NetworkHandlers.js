@@ -9,6 +9,7 @@
  */
 import RemotePlayer from '../../network/RemotePlayer.js';
 import { GAME_W, GAME_H } from '../../config/constants.js';
+import { xpToLevel } from '../../config/skills.js';
 
 export default class NetworkHandlers {
   constructor(scene) {
@@ -81,8 +82,21 @@ export default class NetworkHandlers {
       scene.runTimer = remainingTime;
     };
 
+    this._skillsInitialized = false;
     net.onSkills = (skills) => {
-      if (scene.player) scene.player.skills = skills;
+      if (!scene.player) return;
+      if (this._skillsInitialized) {
+        const old = scene.player.skills;
+        for (const key of Object.keys(skills)) {
+          const delta = (skills[key] ?? 0) - (old[key] ?? 0);
+          if (delta > 0) {
+            const leveled = xpToLevel(skills[key]) > xpToLevel(old[key] ?? 0);
+            scene._showXpFeedback(key, delta, leveled ? xpToLevel(skills[key]) : null);
+          }
+        }
+      }
+      this._skillsInitialized = true;
+      scene.player.skills = skills;
     };
 
     net.onUpgrades = (upgrades) => {

@@ -9,6 +9,7 @@ import {
   encodeChestSave,
   encodeSkillGain,
   encodeRevivePlayer,
+  encodeUpgradeBuild,
   getMsgType,
   decodeWelcome,
   decodeRoomSnapshot,
@@ -277,6 +278,9 @@ export default class NetworkManager {
 
   /** Notify server that this player revived another player. */
   sendRevive(targetPlayerId) { this._send(encodeRevivePlayer(targetPlayerId)); }
+
+  /** Request to build/upgrade a hideout upgrade. */
+  sendUpgradeBuild(upgradeId) { this._send(encodeUpgradeBuild(upgradeId)); }
 
   /**
    * Disconnect cleanly (cancels any pending reconnect).

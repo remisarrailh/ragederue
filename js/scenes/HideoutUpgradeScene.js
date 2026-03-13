@@ -1,6 +1,6 @@
 import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
 import { UPGRADES, UPGRADE_IDS } from '../config/upgrades.js';
-import { encodeUpgradeBuild } from '../network/NetProtocol.js';
+import { KB_BINDS, PAD_BINDS } from '../config/controls.js';
 
 /**
  * HideoutUpgradeScene — overlay UI for hideout upgrades.
@@ -62,11 +62,11 @@ export default class HideoutUpgradeScene extends Phaser.Scene {
     closeBg.on('pointerdown', () => this._close());
 
     // ── Keyboard / Gamepad close ─────────────────────────────────────────
-    this.input.keyboard.on('keydown-ESC', () => this._close());
-    this.input.keyboard.on('keydown-E',   () => this._close());
-    this.input.keyboard.on('keydown-TAB', () => this._close());
+    this.input.keyboard.on(`keydown-${KB_BINDS.CANCEL}`,    () => this._close());
+    this.input.keyboard.on(`keydown-${KB_BINDS.INTERACT}`,  () => this._close());
+    this.input.keyboard.on(`keydown-${KB_BINDS.INVENTORY}`, () => this._close());
     this.input.gamepad.on('down', (pad, btn) => {
-      if (btn.index === 1 || btn.index === 8) this._close();
+      if (btn.index === PAD_BINDS.CANCEL || btn.index === PAD_BINDS.INVENTORY) this._close();
     });
 
     // ── Rows (one per upgrade) ───────────────────────────────────────────
@@ -91,7 +91,7 @@ export default class HideoutUpgradeScene extends Phaser.Scene {
 
     // ── Hint ─────────────────────────────────────────────────────────────
     this.add.text(GAME_W / 2, BOX_Y + BOX_H - 10,
-      IS_MOBILE ? 'Tap BUILD pour ameliorer  X pour fermer' : 'E / ESC : fermer',
+      IS_MOBILE ? 'Tap BUILD pour ameliorer  X pour fermer' : `${KB_BINDS.INTERACT} / ${KB_BINDS.CANCEL} : fermer`,
       { fontFamily: 'monospace', fontSize: '9px', color: '#555577' }
     ).setOrigin(0.5);
   }
@@ -107,18 +107,13 @@ export default class HideoutUpgradeScene extends Phaser.Scene {
     const bg = this.add.rectangle(GAME_W / 2, ry + ROW_H / 2 - 2, BOX_W - 20, ROW_H - 4, 0x1a1a33, 0.7)
       .setStrokeStyle(1, 0x333355, 0.5);
 
-    // Name + stars
+    // Name + stars (première ligne)
     const nameText = this.add.text(BOX_X + 20, ry + 8, '', {
-      fontFamily: 'monospace', fontSize: '12px', color: '#ffdd88',
+      fontFamily: 'monospace', fontSize: '11px', color: '#ffdd88',
       stroke: '#000', strokeThickness: 2,
     });
 
-    // Cost / status line
-    const costText = this.add.text(BOX_X + 20, ry + 26, '', {
-      fontFamily: 'monospace', fontSize: '9px', color: '#aaaacc',
-    });
-
-    // Build button
+    // Build button (à droite, centré verticalement)
     const btnX = BOX_X + BOX_W - 60;
     const btnBg = this.add.rectangle(btnX, ry + ROW_H / 2 - 2, 80, 26, 0x336633, 0.9)
       .setStrokeStyle(1, 0x55aa55, 0.7).setInteractive({ useHandCursor: true });
@@ -131,7 +126,10 @@ export default class HideoutUpgradeScene extends Phaser.Scene {
     btnBg.on('pointerover', () => btnBg.setFillStyle(0x447744, 0.9));
     btnBg.on('pointerout',  () => btnBg.setFillStyle(0x336633, 0.9));
 
-    const rowObj = { id, def, nameText, costText, btnBg, btnText, bg };
+    // matObjs : sprites dynamiques (détruits + recréés à chaque refresh)
+    const matObjs = [];
+
+    const rowObj = { id, def, nameText, btnBg, btnText, bg, matObjs, ry };
     this._rowObjs.push(rowObj);
     this._refreshRow(rowObj);
   }
@@ -141,42 +139,97 @@ export default class HideoutUpgradeScene extends Phaser.Scene {
   }
 
   _refreshRow(row) {
-    const { id, def } = row;
-    const level    = this._upgrades[id] ?? 0;
-    const maxed    = level >= MAX_LEVEL;
-    const stars    = '*'.repeat(level) + '-'.repeat(MAX_LEVEL - level);
+    const { id, def, ry } = row;
+    const level = this._upgrades[id] ?? 0;
+    const maxed = level >= MAX_LEVEL;
+    const stars = '★'.repeat(level) + '☆'.repeat(MAX_LEVEL - level);
 
-    row.nameText.setText(`${def.name}  [${stars}]  niv.${level}/${MAX_LEVEL}`);
+    row.nameText.setText(`${def.name}  ${stars}  ${level}/${MAX_LEVEL}`);
+
+    // Détruire les anciens sprites de matériaux
+    for (const o of row.matObjs) o.destroy();
+    row.matObjs.length = 0;
 
     if (maxed) {
-      row.costText.setText('MAX — ' + def.description).setColor('#55ff55');
+      row.nameText.setColor('#55ff55');
+      const t = this.add.text(BOX_X + 20, ry + 30, '✔ ' + def.description, {
+        fontFamily: 'monospace', fontSize: '9px', color: '#55ff55',
+      });
+      row.matObjs.push(t);
       row.btnBg.setFillStyle(0x224422, 0.7).disableInteractive();
-      row.btnText.setColor('#448844');
+      row.btnText.setColor('#448844').setText('MAX');
     } else {
-      const nextCost   = def.levels[level].cost;
-      const canAfford  = this._canAfford(nextCost);
-      const costStr    = this._formatCost(nextCost, canAfford);
-      row.costText.setText(costStr).setColor(canAfford ? '#99ccff' : '#ff6666');
+      row.nameText.setColor('#ffdd88');
+      const cost     = def.levels[level].cost;
+      const canAfford = this._canAfford(cost);
+
+      // ── Icônes matériaux (deuxième ligne) ──────────────────────────────
+      const matAreaRight = BOX_X + BOX_W - 110;   // laisser place au bouton
+      const entries      = Object.entries(cost);
+      const slotW        = Math.floor((matAreaRight - (BOX_X + 18)) / entries.length);
+      const matY         = ry + 31;
+
+      for (let ei = 0; ei < entries.length; ei++) {
+        const [item, needed] = entries[ei];
+        const have    = this._countItem(item);
+        const chestHave = this._countChestItem(item);
+        const enough  = chestHave >= needed;            // BUILD ← coffre seul
+        const color   = enough ? '#88ff88' : (have >= needed ? '#ffcc44' : '#ff6666');
+        const x       = BOX_X + 18 + ei * slotW;
+
+        // Image de l'item (si la texture existe) ou carré de couleur
+        if (this.textures.exists(item)) {
+          const img = this.add.image(x + 8, matY - 2, item)
+            .setDisplaySize(16, 16).setOrigin(0.5);
+          row.matObjs.push(img);
+        } else {
+          const dot = this.add.rectangle(x + 8, matY - 2, 13, 13,
+            enough ? 0x44aa44 : (have >= needed ? 0xaa8800 : 0xaa3333), 0.85);
+          row.matObjs.push(dot);
+        }
+
+        // Compteur "have/needed"
+        const cnt = this.add.text(x + 17, matY - 8, `${have}/${needed}`, {
+          fontFamily: 'monospace', fontSize: '9px', color,
+          stroke: '#000000', strokeThickness: 2,
+        }).setOrigin(0, 0.5);
+        row.matObjs.push(cnt);
+
+        // Nom du matériau (tout petit)
+        const lbl = this.add.text(x + 17, matY + 2, item, {
+          fontFamily: 'monospace', fontSize: '7px', color: '#888899',
+        }).setOrigin(0, 0.5);
+        row.matObjs.push(lbl);
+      }
 
       row.btnBg.setFillStyle(canAfford ? 0x336633 : 0x552222, 0.9);
       row.btnBg.setInteractive({ useHandCursor: canAfford });
-      row.btnText.setColor(canAfford ? '#aaffaa' : '#cc6666');
+      row.btnText.setColor(canAfford ? '#aaffaa' : '#cc6666').setText('BUILD');
     }
+  }
+
+  /** Compte les items dans le coffre ET dans l'inventaire du joueur. */
+  _countItem(itemType) {
+    let n = this._countChestItem(itemType);
+    if (this.player?.inventory?.items) {
+      for (const it of this.player.inventory.items)
+        if ((it.type ?? it) === itemType) n++;
+    }
+    return n;
+  }
+
+  /** Compte uniquement dans le coffre (source des matériaux pour BUILD). */
+  _countChestItem(itemType) {
+    let n = 0;
+    for (const it of this._chestItems) if (it === itemType) n++;
+    return n;
   }
 
   _canAfford(cost) {
-    const counts = {};
-    for (const it of this._chestItems) counts[it] = (counts[it] ?? 0) + 1;
     for (const [item, qty] of Object.entries(cost)) {
-      if ((counts[item] ?? 0) < qty) return false;
+      if (this._countChestItem(item) < qty) return false;
     }
     return true;
-  }
-
-  _formatCost(cost, canAfford) {
-    return 'Requis (coffre): ' + Object.entries(cost)
-      .map(([k, v]) => `${v}x ${k}`)
-      .join(', ');
   }
 
   _tryBuild(upgradeId) {
@@ -185,8 +238,8 @@ export default class HideoutUpgradeScene extends Phaser.Scene {
     const cost = UPGRADES[upgradeId].levels[level].cost;
     if (!this._canAfford(cost)) return;
 
-    if (this.net?.ws?.send) {
-      this.net.ws.send(encodeUpgradeBuild(upgradeId));
+    if (this.net?.sendUpgradeBuild) {
+      this.net.sendUpgradeBuild(upgradeId);
     }
     // Optimistic local update (server will confirm via S_UPGRADES)
     this._upgrades[upgradeId] = level + 1;

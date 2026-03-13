@@ -1,5 +1,7 @@
 import { GAME_W, GAME_H, IS_MOBILE } from '../config/constants.js';
 import { ITEM_DEFS } from '../config/lootTable.js';
+import { KB_BINDS, PAD_BINDS, addDirListeners } from '../config/controls.js';
+import { SKILL_DEFS, xpProgress } from '../config/skills.js';
 
 const CELL    = IS_MOBILE ? 72 : 48;   // cell size in px
 const GAP     = IS_MOBILE ? 4  : 2;
@@ -12,18 +14,6 @@ const GRID_Y  = Math.round((GAME_H - GRID_H) / 2) - 20;
 
 const TAB_INV   = 0;
 const TAB_STATS = 1;
-
-const SKILL_DEFS = [
-  { key: 'punchSkill', label: 'Poings',  icon: '👊', bonusLabel: 'dmg poings' },
-  { key: 'kickSkill',  label: 'Pieds',   icon: '🦵', bonusLabel: 'dmg pieds' },
-  { key: 'jabSkill',   label: 'Jab',     icon: '⚡',  bonusLabel: 'dmg jab' },
-  { key: 'moveSkill',  label: 'Vitesse', icon: '🏃',  bonusLabel: 'vitesse' },
-  { key: 'runSkill',   label: 'Sprint',  icon: '💨',  bonusLabel: '+vitesse/-conso sprint' },
-  { key: 'jumpSkill',  label: 'Saut',    icon: '🦘',  bonusLabel: '+hauteur/-conso saut' },
-  { key: 'lootSkill',  label: 'Loot',    icon: '📦',  bonusLabel: '-20ms/lv ident.' },
-  { key: 'healSkill',  label: 'Soins',   icon: '💊',  bonusLabel: 'efficacité soins' },
-  { key: 'eatSkill',   label: 'Manger',  icon: '🍕',  bonusLabel: 'efficacité nourriture' },
-];
 
 export default class InventoryScene extends Phaser.Scene {
   constructor() {
@@ -82,27 +72,29 @@ export default class InventoryScene extends Phaser.Scene {
     this._refreshHint();
 
     // ── Input ─────────────────────────────────────────────────────────────
-    this.input.keyboard.on('keydown-TAB', () => {
+    this.input.keyboard.on(`keydown-${KB_BINDS.INVENTORY}`, () => {
       this.registry.set('inputMode', 'kb');
       if (this._activeTab === TAB_INV) this._switchTab(TAB_STATS);
       else this._close();
     });
-    this.input.keyboard.on('keydown-ESC', () => { this.registry.set('inputMode', 'kb'); this._close(); });
-    this.input.keyboard.on('keydown-LEFT',  () => { this.registry.set('inputMode', 'kb'); if (this._activeTab === TAB_INV) this._move(-1, 0); });
-    this.input.keyboard.on('keydown-RIGHT', () => { this.registry.set('inputMode', 'kb'); if (this._activeTab === TAB_INV) this._move(1, 0); });
-    this.input.keyboard.on('keydown-UP',    () => { this.registry.set('inputMode', 'kb'); if (this._activeTab === TAB_INV) this._move(0, -1); });
-    this.input.keyboard.on('keydown-DOWN',  () => { this.registry.set('inputMode', 'kb'); if (this._activeTab === TAB_INV) this._move(0, 1); });
-    this.input.keyboard.on('keydown-X',     () => { this.registry.set('inputMode', 'kb'); if (this._activeTab === TAB_INV) this._useSelected(); });
+    this.input.keyboard.on(`keydown-${KB_BINDS.CANCEL}`,  () => { this.registry.set('inputMode', 'kb'); this._close(); });
+    addDirListeners(this, {
+      onUp:    () => { if (this._activeTab === TAB_INV) this._move(0, -1); },
+      onDown:  () => { if (this._activeTab === TAB_INV) this._move(0,  1); },
+      onLeft:  () => { if (this._activeTab === TAB_INV) this._move(-1, 0); },
+      onRight: () => { if (this._activeTab === TAB_INV) this._move( 1, 0); },
+    });
+    this.input.keyboard.on(`keydown-${KB_BINDS.ACCEPT}`,  () => { this.registry.set('inputMode', 'kb'); if (this._activeTab === TAB_INV) this._useSelected(); });
 
     // Gamepad
     this._gpCooldown = 0;
     this.input.gamepad.on('down', (pad, button) => {
       this.registry.set('inputMode', 'gp');
-      if (button.index === 8) this._close();                          // Select : fermer
-      if (button.index === 4 || button.index === 5) {                 // LB / RB : switch tab
+      if (button.index === PAD_BINDS.INVENTORY) this._close();
+      if (button.index === PAD_BINDS.TAB_LEFT || button.index === PAD_BINDS.TAB_RIGHT) {
         this._switchTab(this._activeTab === TAB_INV ? TAB_STATS : TAB_INV);
       }
-      if (button.index === 0 && this._activeTab === TAB_INV) this._useSelected(); // A / Cross
+      if (button.index === PAD_BINDS.ACCEPT && this._activeTab === TAB_INV) this._useSelected();
     });
   }
 
@@ -296,15 +288,7 @@ export default class InventoryScene extends Phaser.Scene {
       const row = this._skillRows[i];
       const totalXP = player.skills?.[def.key] ?? 0;
 
-      let xp = totalXP, lvl = 0;
-      while (xp >= Math.round(100 * Math.pow(lvl + 1, 1.5))) {
-        xp -= Math.round(100 * Math.pow(lvl + 1, 1.5));
-        lvl++;
-        if (lvl >= 50) break;
-      }
-
-      const lvlCap  = Math.round(100 * Math.pow(lvl + 1, 1.5));
-      const progress = lvl >= 50 ? 1 : xp / lvlCap;
+      const { level: lvl, progress } = xpProgress(totalXP);
 
       row.lvlTxt.setText(`lv ${lvl}`);
       row.barFill.setSize(Math.round(row.barW * progress), 7);
@@ -331,11 +315,11 @@ export default class InventoryScene extends Phaser.Scene {
     if (this._activeTab === TAB_INV) {
       this._hintText.setText(gp
         ? 'D-Pad: naviguer   A: utiliser   LB/RB: stats   Select: fermer'
-        : 'Flèches: naviguer   X: utiliser   TAB: stats   ESC: fermer');
+        : `Flèches: naviguer   ${KB_BINDS.ACCEPT}: utiliser   ${KB_BINDS.INVENTORY}: stats   ${KB_BINDS.CANCEL}: fermer`);
     } else {
       this._hintText.setText(gp
         ? 'LB/RB: inventaire   Select: fermer'
-        : 'TAB: inventaire   ESC: fermer');
+        : `${KB_BINDS.INVENTORY}: inventaire   ${KB_BINDS.CANCEL}: fermer`);
     }
   }
 

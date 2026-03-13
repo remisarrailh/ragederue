@@ -37,13 +37,13 @@
       ],
       "createdAt": 1771879955369,
       "skills": {
-        "moveSkill": 1277,
-        "punchSkill": 5150,
-        "kickSkill": 2380,
-        "lootSkill": 720,
-        "healSkill": 619,
-        "eatSkill": 185,
-        "jabSkill": 3370
+        "moveSkill": 2492,
+        "punchSkill": 6490,
+        "kickSkill": 3400,
+        "lootSkill": 1065,
+        "healSkill": 807,
+        "eatSkill": 250,
+        "jabSkill": 3380
       }
     },
     {
@@ -56,6 +56,30 @@
         "jabSkill": 10,
         "kickSkill": 20,
         "punchSkill": 330
+      }
+    },
+    {
+      "id": "char_1772205231518",
+      "name": "test2",
+      "chestItems": [],
+      "createdAt": 1772205231518,
+      "skills": {
+        "punchSkill": 0,
+        "kickSkill": 0,
+        "jabSkill": 0,
+        "moveSkill": 0,
+        "lootSkill": 0,
+        "healSkill": 0,
+        "eatSkill": 0,
+        "runSkill": 0,
+        "jumpSkill": 0
+      },
+      "upgrades": {
+        "cuisine": 0,
+        "filtration": 0,
+        "coffre": 0,
+        "gym": 0,
+        "atelier": 0
       }
     }
   ]

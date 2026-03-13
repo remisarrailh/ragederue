@@ -1,5 +1,6 @@
 import { CONTAINER_LOOT_TABLES, CONTAINER_ITEM_COUNTS, rollLoot } from '../config/lootTable.js';
 import { updateDepth } from '../systems/DepthSystem.js';
+import { getPropDef } from '../config/propDefs.js';
 
 /**
  * A world container (barrel, crate…) that can be searched for loot.
@@ -20,11 +21,11 @@ export default class Container {
 
     // ── Visual ────────────────────────────────────────────────────────────
     this.image = scene.add.image(x, y, texture).setOrigin(0.5, 1);
-    // Depth basé sur le milieu vertical du sprite : le joueur passe devant
-    // dès que ses pieds dépassent la moitié de la hauteur de l'objet.
-    // Cela évite que de grands sprites (workbench 128px) masquent le joueur
-    // qui se tient juste devant eux.
-    this.image.setDepth(y - this.image.displayHeight * 0.5);
+    const def = getPropDef(texture);
+    this.image.setScale(def.scale ?? 1);
+    // Depth = y (pieds du sprite, origin 0.5 1). Cohérent avec les props
+    // de WorldBuilder et les entités dynamiques (updateDepth utilise les pieds).
+    this.image.setDepth(y);
 
     // ── Searchable properties ─────────────────────────────────────────────
     this.searchable = true;

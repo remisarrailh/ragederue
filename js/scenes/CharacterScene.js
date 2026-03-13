@@ -197,8 +197,8 @@ export default class CharacterScene extends Phaser.Scene {
 
   _onKey(e) {
     if (this._mode === 'list') {
-      if (e.key === 'ArrowUp')   { this._moveSel(-1); return; }
-      if (e.key === 'ArrowDown') { this._moveSel(1);  return; }
+      if (e.key === 'ArrowUp'   || e.key === 'w' || e.key === 'W' || e.key === 'z' || e.key === 'Z') { this._moveSel(-1); return; }
+      if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S')                                   { this._moveSel(1);  return; }
       if (e.key === 'Enter')     { this._action('confirm'); return; }
       if (e.key === 'n' || e.key === 'N') { this._enterCreate(); return; }
       if (e.key === 'Delete' || e.key === 'Backspace') { this._action('delete'); return; }

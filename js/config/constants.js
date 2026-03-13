@@ -72,6 +72,21 @@ export const SPAWN_LEVEL        = 'level_03';  // niveau de départ après séle
 // ─── Version ──────────────────────────────────────────────────────────────
 export const GAME_VERSION       = '0.4.4';
 
+// ─── Loot ─────────────────────────────────────────────────────────────────
+export const LOOT_SEARCH_RADIUS = 64;   // px — distance d'interaction container/corpse
+
+// ─── Depth / Shadow ────────────────────────────────────────────────────────
+export const ENTITY_SCALE = 3.0;        // scale fixe pour tous les sprites entités
+export const SHADOW_W     = 56;         // largeur ellipse ombre
+export const SHADOW_H     = 14;         // hauteur ellipse ombre
+export const SHADOW_ALPHA = 0.35;       // opacité ombre
+
+// ─── localStorage keys ─────────────────────────────────────────────────────
+export const LS_MUSIC_VOL     = 'RAGEDERUE_music_vol';
+export const LS_SFX_VOL       = 'RAGEDERUE_sfx_vol';
+export const LS_PAD_INDEX     = 'RAGEDERUE_padIndex';
+export const LS_EDITOR_LEVELS = 'RAGEDERUE_editor_levels';
+
 // ─── Debug ────────────────────────────────────────────────────────────────
 export const DEBUG_HITBOXES     = false;
 export const DEBUG_DEPTH        = false;

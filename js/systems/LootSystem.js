@@ -1,6 +1,6 @@
 import Container from '../entities/Container.js';
-
-const SEARCH_RADIUS = 64;   // px – distance to interact with a container/body
+import { getPropDef } from '../config/propDefs.js';
+import { LOOT_SEARCH_RADIUS } from '../config/constants.js';
 
 export default class LootSystem {
   /** @param {Phaser.Scene} scene */
@@ -12,26 +12,31 @@ export default class LootSystem {
   }
 
   /**
-   * Spawn containers from a level config containers array.
+   * Spawn containers from objects list.
+   * Filtre via PropDefs : seuls les objets avec isContainer=true sont créés.
    * Call once from GameScene.create().
-   * @param {Array<{x:number, y:number, texture:string}>} containers
+   * @param {Array<{type:string, x:number, y:number}>} objects
    */
-  spawnContainers(containers) {
-    containers.forEach((def, i) => {
-      const c = new Container(this.scene, def.x, def.y, def.texture, {
-        netId: i,
+  spawnContainers(objects) {
+    let netIdx = 0;  // suit exactement l'index de _containerSpawns côté serveur
+    for (const obj of objects) {
+      const def = getPropDef(obj.type ?? obj.texture ?? 'barrel');
+      if (!def.isContainer) continue;
+
+      const texture = obj.type ?? obj.texture ?? 'barrel';
+      // Les containers spéciaux (chest, upgradeStation) ne reçoivent pas de loot
+      // via le système standard — ils gardent netId = -1.
+      const netId = def.specialType ? -1 : netIdx++;
+
+      const c = new Container(this.scene, obj.x, obj.y, texture, {
+        netId,
         skipLoot: true,   // server is loot authority
       });
-      if (def.isHideoutChest) {
-        c.isHideoutChest = true;
-        c.searched       = false;   // always interactable
-      }
-      if (def.isUpgradeStation) {
-        c.isUpgradeStation = true;
-        c.searched         = false;  // always interactable
-      }
+
+      if (def.specialType === 'chest')          { c.isHideoutChest   = true; c.searched = false; }
+      if (def.specialType === 'upgradeStation') { c.isUpgradeStation = true; c.searched = false; }
       this.containers.push(c);
-    });
+    }
   }
 
   /**
@@ -43,7 +48,7 @@ export default class LootSystem {
    */
   update(player, enemies) {
     let best = null;
-    let bestDist = SEARCH_RADIUS;
+    let bestDist = LOOT_SEARCH_RADIUS;
 
     // Check containers
     for (const c of this.containers) {
